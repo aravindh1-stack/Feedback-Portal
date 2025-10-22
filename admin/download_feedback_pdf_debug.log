@@ -1,0 +1,50 @@
+[2025-10-07 03:44:25] Starting PDF generation
+[2025-10-07 03:44:25] Fetched feedback rows: 3
+[2025-10-07 03:44:25] Total participants: 1
+[2025-10-07 03:44:25] Total class students: 5
+[2025-10-07 03:44:25] Created PDF instance
+[2025-10-07 03:44:25] Rendered portrait page
+[2025-10-07 03:44:25] Rendered landscape page
+[2025-10-07 03:44:25] Attempting to output PDF with filename: Feedback_Report_1234567_20251007_034425.pdf
+[2025-10-07 03:44:25] Error encountered: FPDF error: Some data has already been output, can't send PDF file
+[2025-10-07 04:23:47] Starting PDF generation
+[2025-10-07 04:23:47] Fetched feedback rows: 3
+[2025-10-07 04:23:47] Total participants: 1
+[2025-10-07 04:23:47] Total class students: 5
+[2025-10-07 04:23:47] Created PDF instance
+[2025-10-07 04:23:47] Rendered portrait page
+[2025-10-07 04:23:47] Rendered landscape page
+[2025-10-07 04:23:47] Attempting to output PDF with filename: Feedback_Report_1234567_20251007_042347.pdf
+[2025-10-07 04:23:47] PDF output complete
+[2025-10-07 04:27:25] Starting PDF generation
+[2025-10-07 04:27:25] Fetched feedback rows: 3
+[2025-10-07 04:27:25] Total participants: 1
+[2025-10-07 04:27:25] Total class students: 5
+[2025-10-07 04:27:25] Created PDF instance
+[2025-10-07 04:27:25] Rendered portrait page
+[2025-10-07 04:27:25] Rendered landscape page
+[2025-10-07 04:27:25] Attempting to output PDF with filename: Feedback_Report_1234567_20251007_042725.pdf
+[2025-10-07 04:27:25] PDF output complete
+[2025-10-07 04:31:23] Starting PDF generation
+[2025-10-07 04:32:42] Starting PDF generation
+[2025-10-07 04:33:08] Starting PDF generation
+[2025-10-07 04:33:08] Fetched feedback rows: 3
+[2025-10-07 04:33:08] Total participants: 1
+[2025-10-07 04:33:08] Total class students: 5
+[2025-10-07 04:33:08] Created PDF instance
+[2025-10-07 04:33:08] Rendered portrait page
+[2025-10-07 04:33:08] Rendered landscape page
+[2025-10-07 04:33:08] Attempting to output PDF with filename: Feedback_Report_1234567_20251007_043308.pdf
+[2025-10-07 04:33:08] PDF output complete
+[2025-10-07 04:33:54] Starting PDF generation
+[2025-10-07 04:37:15] Starting PDF generation
+[2025-10-07 04:38:34] Starting PDF generation
+[2025-10-07 04:41:03] Starting PDF generation
+[2025-10-07 04:44:15] Starting PDF generation
+[2025-10-07 05:22:40] Starting PDF generation
+[2025-10-07 05:37:15] Starting PDF generation
+[2025-10-07 05:42:44] Starting PDF generation
+[2025-10-07 05:45:43] Starting PDF generation
+[2025-10-07 05:50:50] Starting PDF generation
+[2025-10-07 05:51:24] Starting PDF generation
+[2025-10-08 00:56:17] Starting PDF generation
