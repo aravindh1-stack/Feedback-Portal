@@ -86,13 +86,9 @@ try {
     $monthly_data = [];
 }
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard - College Feedback System</title>
-    
+<?php
+    $page_title = 'Admin Dashboard - College Feedback System';
+    $extra_head = <<<HTML
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzQzMzhDMyIvPgo8cGF0aCBkPSJNOCAxMkg5VjIwSDhWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTEgMTJIMTJWMjBIMTFWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTQgMTJIMTVWMjBIMTRWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K">
     
@@ -102,8 +98,7 @@ try {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     
     <style>
         /* === TAILWIND-INSPIRED PROFESSIONAL THEME === */
@@ -143,14 +138,14 @@ try {
             --text-color: var(--gray-600);
             --heading-color: var(--gray-900);
 
-            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.06);
+            --shadow-md: 0 8px 24px rgba(0,0,0,0.08);
+            --shadow-lg: 0 20px 40px rgba(0,0,0,0.12);
             
             --radius-md: 0.5rem;
-            --radius-lg: 0.75rem;
-            --radius-xl: 1rem;
-            --radius-2xl: 1.25rem;
+            --radius-lg: 0.875rem;
+            --radius-xl: 1.125rem;
+            --radius-2xl: 1.5rem;
             
             --spacing-2: 0.5rem;
             --spacing-3: 0.75rem;
@@ -263,18 +258,20 @@ try {
             text-decoration: none;
             margin: var(--spacing-2) var(--spacing-4);
             border-radius: var(--radius-lg);
+            border: 1px solid transparent;
             font-weight: 500;
             transition: var(--transition-fast);
             animation: slideInLeft 0.4s ease-out forwards;
             opacity: 0;
         }
-        .nav-item:hover { background: var(--primary-50); color: var(--primary-600); }
+        .nav-item:hover { background: var(--primary-50); color: var(--primary-600); border-color: rgba(59,130,246,0.15); }
         body.dark-theme .nav-item:hover { background: rgba(59, 130, 246, 0.1); }
         .nav-item.active {
             background-color: var(--primary-50);
             color: var(--primary-600);
             font-weight: 700;
             position: relative;
+            border-color: rgba(59,130,246,0.25);
         }
         body.dark-theme .nav-item.active { background: rgba(59, 130, 246, 0.1); }
         .nav-item.active::before {
@@ -305,6 +302,7 @@ try {
             position: sticky;
             top: 0;
             z-index: 999;
+            box-shadow: var(--shadow-sm);
         }
         .page-title { font-size: var(--font-size-2xl); font-weight: 700; color: var(--heading-color); }
         .breadcrumb { font-size: var(--font-size-sm); color: var(--gray-500); }
@@ -339,8 +337,9 @@ try {
             position: relative;
             color: var(--text-color);
             font-size: 1.1rem;
+            box-shadow: var(--shadow-sm);
         }
-        .header-btn:hover { border-color: var(--primary-500); color: var(--primary-500); transform: translateY(-2px); }
+        .header-btn:hover { border-color: var(--primary-500); color: var(--primary-500); transform: translateY(-2px); box-shadow: var(--shadow-md); }
         .notification-badge {
             position: absolute;
             top: -5px; right: -5px;
@@ -369,11 +368,12 @@ try {
         .card {
             background: var(--card-bg);
             border-radius: var(--radius-xl);
-            box-shadow: var(--shadow-md);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
             transition: var(--transition-normal);
             overflow: hidden;
         }
-        .card:hover { box-shadow: var(--shadow-lg); transform: translateY(-5px); }
+        .card:hover { box-shadow: var(--shadow-lg); transform: translateY(-6px); }
         .card-header { padding: var(--spacing-6) var(--spacing-6) var(--spacing-4); border-bottom: 1px solid var(--border-color); }
         .card-title { font-size: var(--font-size-lg); font-weight: 700; color: var(--heading-color); margin-bottom: 2px; }
         .card-subtitle { font-size: var(--font-size-sm); color: var(--gray-500); }
@@ -381,21 +381,22 @@ try {
         
         /* Welcome Section */
         .welcome-section {
-            background: var(--card-bg);
-            padding: var(--spacing-8);
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafb 100%);
+            padding: calc(var(--spacing-8) + 0.25rem);
             border-radius: var(--radius-2xl);
             margin-bottom: var(--spacing-8);
-            box-shadow: var(--shadow-md);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
         }
         .welcome-banner {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: var(--spacing-8);
+            margin-bottom: calc(var(--spacing-8) - 0.25rem);
             gap: var(--spacing-6);
         }
-        .welcome-title { font-size: var(--font-size-3xl); font-weight: 700; color: var(--heading-color); }
-        .welcome-subtitle { font-size: var(--font-size-lg); color: var(--text-color); max-width: 500px; }
+        .welcome-title { font-size: var(--font-size-3xl); font-weight: 800; color: var(--heading-color); letter-spacing: -0.01em; }
+        .welcome-subtitle { font-size: var(--font-size-lg); color: var(--text-color); max-width: 560px; }
         .welcome-illustration {
             max-width: 200px;
             flex-shrink: 0;
@@ -411,9 +412,11 @@ try {
             border: none;
             cursor: pointer;
             transition: var(--transition-fast);
+            box-shadow: var(--shadow-sm);
         }
-        .btn-primary { background: var(--primary-500); color: white; box-shadow: var(--shadow-sm); }
+        .btn-primary { background: var(--primary-500); color: white; }
         .btn-primary:hover { background: var(--primary-600); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .btn:focus { outline: none; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25); }
         .btn-danger { background: var(--danger-500); color: white; box-shadow: var(--shadow-sm); }
         .btn-danger:hover { background: var(--danger-600); transform: translateY(-2px); box-shadow: var(--shadow-md); }
 
@@ -461,14 +464,12 @@ try {
             background: var(--card-bg);
             border-radius: var(--radius-xl);
             padding: var(--spacing-6);
-            box-shadow: var(--shadow-md);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
             text-align: center;
             transition: var(--transition-normal);
         }
-        .action-card:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--shadow-lg);
-        }
+        .action-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); }
         .action-icon {
             width: 60px;
             height: 60px;
@@ -480,7 +481,7 @@ try {
             transition: transform 0.3s ease; /* Added for hover effect */
         }
         .action-card:hover .action-icon {
-            transform: scale(1.1) rotate(-5deg); /* Added for hover effect */
+            transform: scale(1.06) rotate(-4deg); /* Added for hover effect */
         }
         .action-title {
             font-size: var(--font-size-lg);
@@ -575,73 +576,16 @@ try {
             .sidebar-toggle { display: grid !important; }
         }
     </style>
-</head>
-<body>
+    HTML;
+    include __DIR__ . '/includes/header.php';
+?>
     <div class="admin-layout">
         <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <a href="dashboard.php" style="text-decoration: none;">
-                    <div class="sidebar-logo">
-                        <i class="fas fa-graduation-cap"></i>
-                        <div>
-                            <div>College Feedback</div>
-                            <div class="sidebar-subtitle">Admin Panel</div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="nav-section">
-                    <div class="nav-section-title">Main</div>
-                    <a href="dashboard.php" class="nav-item active"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-                    <a href="manage_forms.php" class="nav-item"><i class="fas fa-file-alt"></i> Manage Forms</a>
-                    <a href="manage_users.php" class="nav-item"><i class="fas fa-users"></i> Manage Users</a>
-                    <a href="view_feedback.php" class="nav-item"><i class="fas fa-comments"></i> View Feedback</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">System</div>
-                    <a href="#" class="nav-item"><i class="fas fa-cog"></i> Settings</a>
-                    <a href="../logout.php" class="nav-item danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                </div>
-            </div>
-        </nav>
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Header -->
-            <header class="header">
-                <div class="header-left">
-                    <button class="header-btn sidebar-toggle" style="display: none;" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-                    <div>
-                        <h1 class="page-title">Dashboard</h1>
-                        <div class="breadcrumb">
-                            <span><i class="fas fa-home"></i> Admin</span>
-                            <span class="breadcrumb-separator">&nbsp;/&nbsp;</span>
-                            <span>Dashboard</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="header-right">
-                    <div class="header-search">
-                        <i class="fas fa-search search-icon"></i>
-                        <input type="text" class="search-input" placeholder="Search anything...">
-                    </div>
-                    
-                    <div class="header-actions">
-                        <button class="header-btn" data-tooltip="Notifications">
-                            <i class="fas fa-bell"></i>
-                            <span class="notification-badge">3</span>
-                        </button>
-                        <div class="user-menu">
-                            <div class="user-avatar" data-tooltip="Administrator">A</div>
-                        </div>
-                    </div>
-                </div>
-            </header>
+            <?php $page_heading='Dashboard'; $show_theme_toggle=true; $show_search=true; include __DIR__ . '/includes/topbar.php'; ?>
 
             <!-- Content -->
             <div class="content">
@@ -749,162 +693,21 @@ try {
                             <div class="action-icon"><i class="fas fa-sign-out-alt"></i></div>
                             <h3 class="action-title">System Logout</h3>
                             <p class="action-description">Safely log out of the admin portal to end your session.</p>
-                            <a href="../includes/logout.php" class="btn btn-danger btn-sm">Logout</a>
+                            <a href="../logout.php" class="btn btn-danger btn-sm">Logout</a>
                         </div>
                     </div>
                 </div>
 
-                <!-- Dashboard Grid -->
-                <div class="dashboard-grid">
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">Feedback Trends</h3>
-                            <p class="card-subtitle">Monthly submission trends</p>
-                        </div>
-                        <div class="card-body"><div class="chart-container"><canvas id="feedbackTrendsChart"></canvas></div></div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">Department Distribution</h3>
-                            <p class="card-subtitle">Feedback percentage by department</p>
-                        </div>
-                        <div class="card-body"><div class="chart-container"><canvas id="departmentChart"></canvas></div></div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">Recent Activities</h3>
-                            <p class="card-subtitle">Latest system events</p>
-                        </div>
-                        <div class="card-body">
-                            <div class="scrollable-list recent-activities"></div>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">Top Performing Faculty</h3>
-                            <p class="card-subtitle">Based on student feedback ratings</p>
-                        </div>
-                        <div class="card-body">
-                            <div class="scrollable-list faculty-list">
-                                <?php if (empty($top_faculty)): ?>
-                                    <div class="faculty-item">
-                                        <div class="faculty-info">
-                                            <div class="faculty-name">No faculty ratings available</div>
-                                            <div class="faculty-department">Add feedback responses to see faculty rankings</div>
-                                        </div>
-                                    </div>
-                                <?php else: ?>
-                                    <?php foreach ($top_faculty as $faculty): ?>
-                                        <?php 
-                                            $rating = round($faculty['avg_rating'], 1);
-                                            $stars = '';
-                                            for ($i = 1; $i <= 5; $i++) {
-                                                if ($i <= $rating) {
-                                                    $stars .= '★';
-                                                } else {
-                                                    $stars .= '☆';
-                                                }
-                                            }
-                                        ?>
-                                        <div class="faculty-item">
-                                            <div class="faculty-info">
-                                                <div class="faculty-name"><?php echo htmlspecialchars($faculty['name']); ?></div>
-                                                <div class="faculty-department"><?php echo htmlspecialchars($faculty['department']); ?></div>
-                                            </div>
-                                            <div class="faculty-rating">
-                                                <span class="rating-stars"><?php echo $stars; ?></span>&nbsp;<?php echo $rating; ?>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                
             </div>
+            <?php include __DIR__ . '/includes/footer.php'; ?>
         </main>
     </div>
 
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         // --- THEME & UI ---
-        const isDarkMode = () => document.body.classList.contains('dark-theme');
-
         window.toggleSidebar = () => document.querySelector('.sidebar').classList.toggle('active');
-
-        function initThemeToggle() {
-            const themeToggle = document.createElement('button');
-            themeToggle.className = 'header-btn';
-            themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
-            themeToggle.setAttribute('data-tooltip', 'Toggle Dark Mode');
-            
-            themeToggle.addEventListener('click', function() {
-                document.body.classList.toggle('dark-theme');
-                const isDark = isDarkMode();
-                this.querySelector('i').className = isDark ? 'fas fa-sun' : 'fas fa-moon';
-                if(window.myCharts) {
-                    window.myCharts.forEach(chart => chart.destroy());
-                    initCharts();
-                }
-            });
-            
-            document.querySelector('.header-actions').insertBefore(themeToggle, document.querySelector('.user-menu'));
-        }
-        initThemeToggle();
-        
-        // --- CHARTS INITIALIZATION ---
-        window.myCharts = [];
-        function initCharts() {
-            const chartTextColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim();
-            const chartGridColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color').trim();
-            const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-500').trim();
-
-            const feedbackCtx = document.getElementById('feedbackTrendsChart')?.getContext('2d');
-            if (feedbackCtx) {
-                const monthlyLabels = <?php echo json_encode($monthly_labels); ?>;
-                const monthlyData = <?php echo json_encode($monthly_data); ?>;
-                
-                const feedbackChart = new Chart(feedbackCtx, {
-                    type: 'line',
-                    data: {
-                        labels: monthlyLabels.length > 0 ? monthlyLabels : ['No Data'],
-                        datasets: [{
-                            label: 'Submissions',
-                            data: monthlyData.length > 0 ? monthlyData : [0],
-                            borderColor: primaryColor,
-                            backgroundColor: isDarkMode() ? 'rgba(59, 130, 246, 0.2)' : 'rgba(59, 130, 246, 0.1)',
-                            borderWidth: 2, fill: true, tension: 0.4,
-                            pointBackgroundColor: primaryColor, pointBorderColor: '#fff', pointHoverRadius: 6,
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: chartTextColor } }, y: { grid: { color: chartGridColor }, ticks: { color: chartTextColor } } } }
-                });
-                window.myCharts.push(feedbackChart);
-            }
-            
-            const departmentCtx = document.getElementById('departmentChart')?.getContext('2d');
-            if (departmentCtx) {
-                const deptLabels = <?php echo json_encode($dept_labels); ?>;
-                const deptData = <?php echo json_encode($dept_data); ?>;
-                
-                const departmentChart = new Chart(departmentCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: deptLabels.length > 0 ? deptLabels : ['No Data'],
-                        datasets: [{ 
-                            data: deptData.length > 0 ? deptData : [1], 
-                            backgroundColor: [primaryColor, '#16a34a', '#d97706', '#dc2626', '#8b5cf6', '#db2777', '#f59e0b', '#10b981'], 
-                            borderWidth: 0, 
-                            hoverBorderWidth: 4, 
-                            hoverBorderColor: getComputedStyle(document.documentElement).getPropertyValue('--card-bg').trim() 
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, color: chartTextColor, padding: 20 } } } }
-                });
-                window.myCharts.push(departmentChart);
-            }
-        }
-        initCharts();
 
         // --- DYNAMIC CONTENT & ANIMATIONS ---
         function animateCounters() {
@@ -924,26 +727,7 @@ try {
         }
         setTimeout(animateCounters, 300);
 
-        function populateInitialActivities() {
-            const activities = [
-                { icon: 'fa-user-plus', type: 'success', description: 'New student registration completed', user: 'John Doe', time: '2 minutes ago' },
-                { icon: 'fa-comment', type: 'info', description: 'Feedback submitted for Computer Science', user: 'Sarah Smith', time: '15 minutes ago' },
-                { icon: 'fa-file-plus', type: 'warning', description: 'New feedback form created for Mathematics', user: 'Dr. Johnson', time: '1 hour ago' },
-                { icon: 'fa-sign-in-alt', type: 'success', description: 'Faculty member logged in successfully', user: 'Prof. Wilson', time: '2 hours ago' },
-                { icon: 'fa-chart-line', type: 'info', description: 'Monthly report generated successfully', user: 'System', time: '3 hours ago' }
-            ];
-            const container = document.querySelector('.recent-activities');
-            container.innerHTML = activities.map(act => `
-                <div class="activity-item">
-                    <div class="activity-icon ${act.type}"><i class="fas ${act.icon}"></i></div>
-                    <div class="activity-content">
-                        <div class="activity-description">${act.description}</div>
-                        <div class="activity-meta"><span>By: ${act.user}</span> &bull; <span>${act.time}</span></div>
-                    </div>
-                </div>
-            `).join('');
-        }
-        populateInitialActivities();
+        
 
         // Sidebar animation staggering
         document.querySelectorAll('.sidebar-nav .nav-item').forEach((item, index) => {

@@ -26,17 +26,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $department = $_POST['department'] ?? '';
     $year = $_POST['year'] ?? '';
     $semester = $_POST['semester'] ?? '';
+    $assignments = $_POST['assignments'] ?? [];
     $questions = $_POST['questions'] ?? [];
     $form_number = $_POST['form_number'] ?? '';
 
-    if (!empty($department) && !empty($year) && !empty($semester) && !empty($questions) && !empty($form_number)) {
+    if (!empty($department) && !empty($year) && !empty($semester) && !empty($questions) && !empty($assignments) && !empty($form_number)) {
         try {
             $conn->begin_transaction();
-            foreach ($questions as $question) {
-                if (!empty($question['text']) && !empty($question['subject']) && !empty($question['faculty'])) {
-                    $stmt = $conn->prepare("INSERT INTO feedback_forms (form_number, department, year, semester, subject_code, faculty_id, question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
-                    $stmt->bind_param("sssssis", $form_number, $department, $year, $semester, $question['subject'], $question['faculty'], $question['text']);
-                    $stmt->execute();
+            // Ensure form_questions table exists
+            $conn->query("CREATE TABLE IF NOT EXISTS form_questions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                form_number VARCHAR(64) NOT NULL,
+                question_text VARCHAR(500) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_form_question (form_number, question_text)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            // Insert unique questions for this form into form_questions
+            $seenTexts = [];
+            $stmtQ = $conn->prepare("INSERT IGNORE INTO form_questions (form_number, question_text) VALUES (?, ?)");
+            foreach ($questions as $q) {
+                $qtext = trim($q['text'] ?? '');
+                if ($qtext !== '' && !isset($seenTexts[$qtext])) {
+                    $seenTexts[$qtext] = true;
+                    $stmtQ->bind_param("ss", $form_number, $qtext);
+                    $stmtQ->execute();
+                }
+            }
+
+            // Cross-assign all question texts to every subject/faculty assignment
+            foreach ($assignments as $row) {
+                $subject_code = trim($row['code'] ?? '');
+                $subject_name = trim($row['name'] ?? ''); // optional, not stored currently
+                $faculty_id = intval($row['faculty'] ?? 0);
+                if ($subject_code !== '' && $faculty_id > 0) {
+                    foreach ($questions as $q) {
+                        $qtext = trim($q['text'] ?? '');
+                        if ($qtext !== '') {
+                            $stmt = $conn->prepare("INSERT INTO feedback_forms (form_number, department, year, semester, subject_code, faculty_id, question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
+                            $stmt->bind_param("sssssis", $form_number, $department, $year, $semester, $subject_code, $faculty_id, $qtext);
+                            $stmt->execute();
+                        }
+                    }
                 }
             }
             $conn->commit();
@@ -48,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['message_type'] = 'error';
         }
     } else {
-        $_SESSION['message'] = "Please fill all required fields and add at least one question.";
+        $_SESSION['message'] = "Please fill all required fields, add at least one subject/faculty assignment and at least one question.";
         $_SESSION['message_type'] = 'error';
     }
     header("Location: create_feedback_form.php");
@@ -88,19 +119,14 @@ if (isset($_SESSION['message'])) {
     unset($_SESSION['message_type']);
 }
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Feedback Form - Admin Dashboard</title>
-    
+<?php
+    $page_title = 'Create Feedback Form - Admin Dashboard';
+    $extra_head = <<<HTML
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzQzMzhDMyIvPgo8cGF0aCBkPSJNOCAxMkg5VjIwSDhWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTEgMTJIMTJWMjBIMTFWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTQgMTJIMTVWMjBIMTRWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    
     <style>
         :root {
             --primary-50: #eff6ff; --primary-500: #3b82f6; --primary-600: #2563eb;
@@ -135,8 +161,17 @@ if (isset($_SESSION['message'])) {
         .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 4px; height: 24px; background: var(--primary-500); border-radius: 0 4px 4px 0; }
         .nav-item.danger:hover { background-color: var(--danger-100); color: var(--danger-600); }
         .nav-item i { width: 20px; text-align: center; }
-        .header { height: var(--header-height); background: var(--header-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--spacing-8); position: sticky; top: 0; z-index: 999; }
+        .header { height: var(--header-height); background: var(--header-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--spacing-8); position: sticky; top: 0; z-index: 999; flex-wrap: nowrap; }
         .page-title { font-size: var(--font-size-2xl); font-weight: 700; color: var(--heading-color); }
+        .header-left { display:flex; align-items:center; gap: var(--spacing-4); }
+        .header-right { display: flex; align-items: center; gap: var(--spacing-4); }
+        .header-actions { display:flex; align-items:center; gap: var(--spacing-3); }
+        .header-search { position: relative; width: 280px; max-width: 100%; }
+        .header-btn { width: 44px; height: 44px; border: 1px solid var(--border-color); background: var(--card-bg); border-radius: var(--radius-lg); display: grid; place-items: center; cursor: pointer; transition: var(--transition-fast); position: relative; color: var(--text-color); font-size: 1.1rem; box-shadow: var(--shadow-sm); }
+        .header-btn:hover { border-color: var(--primary-500); color: var(--primary-500); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .notification-badge { position: absolute; top: -5px; right: -5px; background: var(--danger-500); color: white; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 10px; border: 2px solid var(--card-bg); }
+        .user-avatar { width: 44px; height: 44px; background: var(--primary-500); border-radius: var(--radius-lg); display: grid; place-items: center; color: white; font-weight: 600; cursor: pointer; transition: var(--transition-fast); }
+        .user-avatar:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
         .card { background: var(--card-bg); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); margin-bottom: 2rem; }
         .card-header { padding: var(--spacing-5) var(--spacing-6); border-bottom: 1px solid var(--border-color); }
         .card-title { font-size: var(--font-size-lg); font-weight: 600; color: var(--heading-color); }
@@ -184,54 +219,16 @@ if (isset($_SESSION['message'])) {
             .form-grid { grid-template-columns: 1fr; }
         }
     </style>
-</head>
-<body>
+    HTML;
+    include __DIR__ . '/includes/header.php';
+?>
     <div class="admin-layout">
         <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <a href="dashboard.php" style="text-decoration: none;">
-                    <div class="sidebar-logo">
-                        <i class="fas fa-graduation-cap"></i>
-                        <div>
-                            <div>College Feedback</div>
-                            <div class="sidebar-subtitle">Admin Panel</div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="nav-section">
-                    <div class="nav-section-title">Main</div>
-                    <a href="dashboard.php" class="nav-item"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-                    <a href="#" class="nav-item"><i class="fas fa-chart-bar"></i> Analytics</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">Management</div>
-                    <a href="manage_users.php" class="nav-item"><i class="fas fa-users"></i> Users</a>
-                    <a href="create_feedback_form.php" class="nav-item active"><i class="fas fa-file-alt"></i> Create Form</a>
-                    <a href="manage_forms.php" class="nav-item"><i class="fas fa-tasks"></i> Manage Forms</a>
-                    <a href="view_feedback.php" class="nav-item"><i class="fas fa-comments"></i> View Feedback</a>
-                    <a href="student_feedback_list.php" class="nav-item"><i class="fas fa-user-graduate"></i> Student Data</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">System</div>
-                    <a href="#" class="nav-item"><i class="fas fa-cog"></i> Settings</a>
-                    <a href="../includes/logout.php" class="nav-item danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                </div>
-            </div>
-        </nav>
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
         <!-- Main Content -->
         <main class="main-content">
-            <header class="header">
-                 <div>
-                    <h1 class="page-title">Create Feedback Form</h1>
-                 </div>
-            </header>
+            <?php $page_heading='Create Feedback Form'; $show_theme_toggle=false; $show_search=false; include __DIR__ . '/includes/topbar.php'; ?>
 
             <div class="content">
                 <form id="feedbackForm" method="post" onsubmit="showLoader()">
@@ -276,13 +273,30 @@ if (isset($_SESSION['message'])) {
                         </div>
                     </div>
 
-                    <!-- Step 2: Questions -->
+                    <!-- Step 2: Assign Subjects & Faculty -->
                     <div class="card animated" style="animation-delay: 0.2s;">
-                         <div class="card-header">
-                            <h2 class="card-title">Step 2: Add Questions</h2>
+                        <div class="card-header">
+                            <h2 class="card-title">Step 2: Assign Subjects & Faculty</h2>
                         </div>
                         <div class="card-body">
-                             <div id="questionsContainer">
+                            <div id="assignmentsContainer">
+                                <!-- Assignment rows will be dynamically inserted here -->
+                            </div>
+                            <div class="actions-container">
+                                <button type="button" class="btn btn-secondary" onclick="addAssignmentRow()">
+                                    <i class="fas fa-plus"></i> Add Another Subject
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Create Questions -->
+                    <div class="card animated" style="animation-delay: 0.25s;">
+                        <div class="card-header">
+                            <h2 class="card-title">Step 3: Create Questions</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="questionsContainer">
                                 <!-- Question cards will be dynamically inserted here -->
                             </div>
                             <div class="actions-container">
@@ -326,6 +340,7 @@ if (isset($_SESSION['message'])) {
 
     <script>
         let questionCount = 0;
+        let assignmentCount = 0;
         const facultyData = <?php echo json_encode($facultyData); ?>;
         const sampleQuestions = {
             'CSE': [
@@ -423,18 +438,6 @@ if (isset($_SESSION['message'])) {
                             </button>
                         </div>
                     </div>
-                    <div class="form-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 0;">
-                        <div class="form-group">
-                            <label>Subject Code</label>
-                            <input type="text" class="form-control" name="questions[${newIndex}][subject]" placeholder="E.g., CS101" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Faculty</label>
-                            <select class="form-control" name="questions[${newIndex}][faculty]" required>
-                                ${generateFacultyOptions()}
-                            </select>
-                        </div>
-                    </div>
                 </div>
             `;
             container.appendChild(card);
@@ -454,6 +457,58 @@ if (isset($_SESSION['message'])) {
                 card.querySelector('.question-number').textContent = `Question ${index + 1}`;
             });
         }
+
+        function addAssignmentRow() {
+            const container = document.getElementById('assignmentsContainer');
+            const idx = assignmentCount++;
+            const row = document.createElement('div');
+            row.className = 'card animated';
+            row.setAttribute('data-assign-index', idx);
+            row.style.animationDelay = `${(container.children.length * 0.05)}s`;
+            row.innerHTML = `
+                <div class="card-header">
+                    <span class="question-number">Subject/Faculty ${container.children.length + 1}</span>
+                    <button type="button" class="btn btn-danger" style="padding: 0.3rem 0.6rem;" onclick="removeAssignmentRow(${idx})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid" style="grid-template-columns: 1fr 2fr 1.5fr;">
+                        <div class="form-group">
+                            <label>Subject Code</label>
+                            <input type="text" class="form-control" name="assignments[${idx}][code]" placeholder="E.g., CS101" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Subject Name</label>
+                            <input type="text" class="form-control" name="assignments[${idx}][name]" placeholder="E.g., Data Structures">
+                        </div>
+                        <div class="form-group">
+                            <label>Faculty</label>
+                            <select class="form-control" name="assignments[${idx}][faculty]" required>
+                                ${generateFacultyOptions()}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(row);
+            updateAssignmentNumbers();
+        }
+
+        function removeAssignmentRow(idx) {
+            const row = document.querySelector(`[data-assign-index="${idx}"]`);
+            if (row) {
+                row.remove();
+                updateAssignmentNumbers();
+            }
+        }
+
+        function updateAssignmentNumbers() {
+            document.querySelectorAll('#assignmentsContainer .card').forEach((card, index) => {
+                const label = card.querySelector('.question-number');
+                if (label) label.textContent = `Subject/Faculty ${index + 1}`;
+            });
+        }
         
         function previewForm() {
             const formNumber = document.querySelector('input[name="form_number"]').value;
@@ -465,12 +520,17 @@ if (isset($_SESSION['message'])) {
             const year = yearSelect.options[yearSelect.selectedIndex].text;
             const semester = semSelect.options[semSelect.selectedIndex].text;
             
+            const assignments = Array.from(document.querySelectorAll('#assignmentsContainer .card')).map((card, index) => {
+                const code = card.querySelector('input[name^="assignments"][name$="[code]"]').value;
+                const name = card.querySelector('input[name^="assignments"][name$="[name]"]').value;
+                const facultySelect = card.querySelector('select[name^="assignments"][name$="[faculty]"]');
+                const facultyName = facultySelect && facultySelect.selectedIndex >= 0 ? facultySelect.options[facultySelect.selectedIndex].text : '';
+                return `<li><strong>${code}</strong> - ${name || 'Untitled'}<br><small>${facultyName}</small></li>`;
+            }).join('');
+
             const questions = Array.from(document.querySelectorAll('#questionsContainer .card')).map((card, index) => {
                 const text = card.querySelector('textarea').value;
-                const subject = card.querySelector('input[type="text"]').value;
-                const facultySelect = card.querySelector('select');
-                const facultyName = facultySelect.options[facultySelect.selectedIndex].text;
-                return `<li><strong>Q${index+1}: ${text}</strong><br><small>Subject: ${subject} | Faculty: ${facultyName}</small></li>`;
+                return `<li>Q${index+1}: ${text}</li>`;
             }).join('');
             
             const previewBody = document.getElementById('previewBody');
@@ -480,14 +540,17 @@ if (isset($_SESSION['message'])) {
                 <p><strong>Year:</strong> ${year}</p>
                 <p><strong>Semester:</strong> ${semester}</p>
                 <hr style="margin: 1rem 0; border-color: var(--border-color);">
-                <h4>Questions:</h4>
+                <h4>Subjects & Faculty:</h4>
+                <ul style="list-style-position: inside; padding-left: 0;">${assignments || '<li>No subjects assigned yet.</li>'}</ul>
+                <h4 style="margin-top: 1rem;">Questions:</h4>
                 <ul style="list-style-position: inside; padding-left: 0;">${questions || '<li>No questions added yet.</li>'}</ul>
             `;
             openModal('previewModal');
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            addQuestion(); // Add the first blank question automatically
+            addAssignmentRow(); // Start with one subject/faculty row
+            addQuestion(); // Start with one blank question
             
             <?php if (!empty($message)): ?>
                 showMessageModal('<?php echo addslashes($message); ?>', '<?php echo $message_type; ?>');

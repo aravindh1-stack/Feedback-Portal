@@ -503,6 +503,8 @@ $result = $conn->query($sql);
     </style>
 </head>
 <body>
+    <?php include __DIR__ . '/includes/sidebar.php'; ?>
+    <div style="margin-left: 280px;">
     <!-- Header -->
     <header class="header">
         <div class="header-container">
@@ -692,5 +694,6 @@ $result = $conn->query($sql);
             });
         });
     </script>
+</div>
 </body>
 </html>

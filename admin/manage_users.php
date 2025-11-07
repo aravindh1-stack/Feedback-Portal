@@ -382,19 +382,14 @@ if (isset($_SESSION['bulk_errors'])) {
 }
 
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Users - Admin Dashboard</title>
-    
+<?php
+    $page_title = 'Manage Users - Admin Dashboard';
+    $extra_head = <<<HTML
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzQzMzhDMyIvPgo8cGF0aCBkPSJNOCAxMkg5VjIwSDhWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTEgMTJIMTJWMjBIMTFWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTQgMTJIMTVWMjBIMTRWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    
     <style>
         :root {
             --primary-50: #eff6ff; --primary-500: #3b82f6; --primary-600: #2563eb;
@@ -410,6 +405,16 @@ if (isset($_SESSION['bulk_errors'])) {
             --font-size-sm: 0.875rem; --font-size-base: 1rem; --font-size-2xl: 1.5rem; --font-size-3xl: 2.25rem;
             --transition-fast: all 0.2s ease-in-out; --transition-normal: all 0.3s ease-in-out;
             --sidebar-width: 280px; --header-height: 80px;
+        }
+        /* Dark Theme Variables */
+        body.dark-theme {
+            --body-bg: #111827;
+            --sidebar-bg: var(--gray-900);
+            --card-bg: var(--gray-900);
+            --header-bg: rgba(17, 24, 39, 0.85);
+            --border-color: #374151; /* ~gray-700 */
+            --text-color: var(--gray-400);
+            --heading-color: #E5E7EB; /* ~gray-200 */
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background-color: var(--body-bg); color: var(--text-color); line-height: 1.6; }
@@ -429,12 +434,42 @@ if (isset($_SESSION['bulk_errors'])) {
         .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 4px; height: 24px; background: var(--primary-500); border-radius: 0 4px 4px 0; }
         .nav-item.danger:hover { background-color: var(--danger-100); color: var(--danger-600); }
         .nav-item i { width: 20px; text-align: center; }
-        .header { height: var(--header-height); background: var(--header-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--spacing-8); position: sticky; top: 0; z-index: 999; }
+        .header { height: var(--header-height); background: var(--header-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--spacing-8); position: sticky; top: 0; z-index: 999; flex-wrap: nowrap; }
         .page-title { font-size: var(--font-size-2xl); font-weight: 700; color: var(--heading-color); }
+        .header-left { display:flex; align-items:center; gap: var(--spacing-4); }
+        .header-right { display: flex; align-items: center; gap: var(--spacing-4); }
+        .header-actions { display:flex; align-items:center; gap: var(--spacing-3); }
+        .header-search { position: relative; width: 280px; max-width: 100%; }
+        .header-btn {
+            width: 44px; height: 44px;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            border-radius: var(--radius-lg);
+            display: grid; place-items: center;
+            cursor: pointer; transition: var(--transition-fast);
+            position: relative; color: var(--text-color);
+            font-size: 1.1rem; box-shadow: var(--shadow-sm);
+        }
+        .header-btn:hover { border-color: var(--primary-500); color: var(--primary-500); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .notification-badge {
+            position: absolute; top: -5px; right: -5px;
+            background: var(--danger-500); color: white; font-size: 10px; font-weight: 600;
+            padding: 2px 6px; border-radius: 10px; border: 2px solid var(--card-bg);
+        }
+        .user-avatar { width: 44px; height: 44px; background: var(--primary-500); border-radius: var(--radius-lg); display: grid; place-items: center; color: white; font-weight: 600; cursor: pointer; transition: var(--transition-fast); }
+        .user-avatar:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
         .card { background: var(--card-bg); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); margin-bottom: 2rem; }
         .card-header { padding: var(--spacing-5) var(--spacing-6); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;}
         .card-title { font-size: var(--font-size-lg); font-weight: 600; color: var(--heading-color); }
         .card-body { padding: var(--spacing-6); }
+        /* Page Toolbar */
+        .page-toolbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom: 1rem; }
+        .page-title-xl { font-size: 1.25rem; font-weight: 700; color: var(--heading-color); }
+        .toolbar-actions { display:flex; align-items:center; gap:.5rem; }
+        .btn-light { background: var(--card-bg); border:1px solid var(--border-color); color: var(--text-color); }
+        .btn-light:hover { border-color: var(--primary-500); color: var(--primary-600); }
+        .badge { display:inline-flex; align-items:center; gap:.375rem; padding:.25rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 600; border:1px solid var(--border-color); background: var(--gray-50); color: var(--gray-600); }
+        body.dark-theme .badge { background: rgba(255,255,255,0.04); }
         .search-and-actions { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
         .filter-controls { display: flex; gap: var(--spacing-3); align-items: center; flex-wrap: wrap;}
         .search-wrapper { position: relative; }
@@ -451,14 +486,20 @@ if (isset($_SESSION['bulk_errors'])) {
         .btn-secondary:hover { background: var(--gray-300); }
         .table-wrapper { overflow-x: auto; }
         .user-table { width: 100%; border-collapse: collapse; }
-        .user-table th, .user-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; border-bottom: 1px solid var(--border-color); }
+        .user-table th, .user-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; }
         .user-table thead { background-color: var(--gray-50); }
+        .user-table thead th { border-bottom: 1px solid var(--border-color); }
         .user-table th { font-size: var(--font-size-sm); font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em; }
+        .user-table tbody tr { border-bottom: 1px solid var(--border-color); }
+        .user-table tbody tr:last-child { border-bottom: 0; }
         .user-table tbody tr:hover { background-color: var(--gray-50); }
         .action-buttons { display: flex; gap: var(--spacing-3); }
         .action-btn { background: none; border: none; cursor: pointer; color: var(--gray-400); font-size: 1rem; }
         .action-btn:hover { color: var(--primary-500); }
         .action-btn.delete:hover { color: var(--danger-500); }
+        .tabs { display:flex; gap:.5rem; margin-bottom: 1.25rem; }
+        .tab-btn { padding:.5rem 1rem; border:1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); border-radius: var(--radius-lg); cursor:pointer; font-weight:600; }
+        .tab-btn.active { background: var(--primary-50); color: var(--primary-600); border-color: rgba(59,130,246,.25); }
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--transition-fast); }
         .modal-overlay.active { display: flex; opacity: 1; }
         .modal-content { background: var(--card-bg); padding: var(--spacing-8); border-radius: var(--radius-xl); max-width: 500px; width: 90%; box-shadow: var(--shadow-lg); position: relative; transform: scale(0.95); transition: transform var(--transition-fast); }
@@ -500,81 +541,28 @@ if (isset($_SESSION['bulk_errors'])) {
             .stats-grid { grid-template-columns: 1fr; }
         }
     </style>
-</head>
-<body>
+    HTML;
+    include __DIR__ . '/includes/header.php';
+?>
     <div id="loadingOverlay" class="loader-overlay">
         <div class="loader-spinner"></div>
     </div>
     <div class="admin-layout">
         <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <a href="dashboard.php" style="text-decoration: none;">
-                    <div class="sidebar-logo">
-                        <i class="fas fa-graduation-cap"></i>
-                        <div>
-                            <div>College Feedback</div>
-                            <div class="sidebar-subtitle">Admin Panel</div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="nav-section">
-                    <div class="nav-section-title">Main</div>
-                    <a href="dashboard.php" class="nav-item"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-                    <a href="#" class="nav-item"><i class="fas fa-chart-bar"></i> Analytics</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">Management</div>
-                    <a href="manage_users.php" class="nav-item active"><i class="fas fa-users"></i> Users</a>
-                    <a href="manage_forms.php" class="nav-item"><i class="fas fa-file-alt"></i> Manage Forms</a>
-                    <a href="view_feedback.php" class="nav-item"><i class="fas fa-comments"></i> View Feedback</a>
-                    <a href="student_feedback_list.php" class="nav-item"><i class="fas fa-user-graduate"></i> Student Data</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">System</div>
-                    <a href="#" class="nav-item"><i class="fas fa-cog"></i> Settings</a>
-                    <a href="../includes/logout.php" class="nav-item danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                </div>
-            </div>
-        </nav>
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
         <!-- Main Content -->
         <main class="main-content">
-            <header class="header">
-                 <div>
-                    <h1 class="page-title">User Management</h1>
-                 </div>
-            </header>
+            <?php $page_heading='Manage Users'; $show_theme_toggle=false; $show_search=false; include __DIR__ . '/includes/topbar.php'; ?>
 
             <div class="content">
-                <!-- Statistics Cards -->
-                <div class="stats-grid">
-                    <div class="stat-card animated" style="animation-delay: 0.1s;">
-                        <div class="stat-icon students">
-                            <i class="fas fa-user-graduate"></i>
-                        </div>
-                        <div class="stat-info">
-                            <div class="stat-value" data-count="<?php echo $student_count; ?>">0</div>
-                            <div class="stat-label">Total Students</div>
-                        </div>
-                    </div>
-                    <div class="stat-card animated" style="animation-delay: 0.2s;">
-                        <div class="stat-icon faculty">
-                            <i class="fas fa-chalkboard-teacher"></i>
-                        </div>
-                        <div class="stat-info">
-                            <div class="stat-value" data-count="<?php echo $faculty_count; ?>">0</div>
-                            <div class="stat-label">Total Faculty</div>
-                        </div>
-                    </div>
+
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="students">Students</button>
+                    <button class="tab-btn" data-tab="faculty">Faculty</button>
                 </div>
 
-                <!-- Students Table Card -->
+                <section id="students-section">
                 <div class="card animated" style="animation-delay: 0.3s;">
                     <div class="card-header">
                         <h2 class="card-title">Students List</h2>
@@ -628,9 +616,9 @@ if (isset($_SESSION['bulk_errors'])) {
                                         <td><?php echo htmlspecialchars($row['name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['sin_number']); ?></td>
                                         <td><?php echo htmlspecialchars($row['email'] ?? 'Not provided'); ?></td>
-                                        <td><?php echo htmlspecialchars($row['department']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['year']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['semester']); ?></td>
+                                        <td><span class="badge"><i class="fas fa-building"></i><?php echo htmlspecialchars($row['department']); ?></span></td>
+                                        <td><span class="badge"><i class="fas fa-layer-group"></i><?php echo htmlspecialchars($row['year']); ?></span></td>
+                                        <td><span class="badge"><i class="fas fa-flag"></i><?php echo htmlspecialchars($row['semester']); ?></span></td>
                                         <td class="action-buttons">
                                             <button class="action-btn" title="Edit" onclick='openEditStudentModal(<?php echo json_encode($row); ?>)'><i class="fas fa-pencil-alt"></i></button>
                                             <button class="action-btn delete" title="Delete" onclick="openDeleteConfirmationModal(<?php echo $row['id']; ?>, 'student')"><i class="fas fa-trash"></i></button>
@@ -642,8 +630,9 @@ if (isset($_SESSION['bulk_errors'])) {
                         </div>
                     </div>
                 </div>
+                </section>
 
-                <!-- Faculty Table Card -->
+                <section id="faculty-section" style="display:none;">
                 <div class="card animated" style="animation-delay: 0.4s;">
                     <div class="card-header">
                         <h2 class="card-title">Faculty List</h2>
@@ -691,7 +680,9 @@ if (isset($_SESSION['bulk_errors'])) {
                         </div>
                     </div>
                 </div>
+                </section>
             </div>
+            <?php include __DIR__ . '/includes/footer.php'; ?>
         </main>
     </div>
 
@@ -1071,7 +1062,55 @@ if (isset($_SESSION['bulk_errors'])) {
                 };
                 update();
             });
+
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', function(){
+                    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+                    this.classList.add('active');
+                    var tab = this.getAttribute('data-tab');
+                    document.getElementById('students-section').style.display = tab === 'students' ? 'block' : 'none';
+                    document.getElementById('faculty-section').style.display = tab === 'faculty' ? 'block' : 'none';
+                });
+            });
+
+            // Global search in topbar -> routes to active tab input
+            const topbarSearch = document.querySelector('.header .header-search .search-input');
+            const globalSearch = document.getElementById('globalSearch');
+            const searchEl = topbarSearch || globalSearch;
+            if (searchEl) {
+                searchEl.addEventListener('input', function(){
+                    const value = this.value;
+                    const activeTab = document.querySelector('.tab-btn.active')?.getAttribute('data-tab') || 'students';
+                    if (activeTab === 'students') {
+                        const input = document.getElementById('studentSearch');
+                        if (input) { input.value = value; }
+                        if (typeof filterStudentTable === 'function') filterStudentTable();
+                    } else {
+                        const input = document.getElementById('facultySearch');
+                        if (input) { input.value = value; }
+                        if (typeof filterFacultyTable === 'function') filterFacultyTable();
+                    }
+                });
+            }
         });
+
+        function exportVisibleRowsToCSV(tableId, filename) {
+            const table = document.getElementById(tableId);
+            if (!table) return;
+            const rows = Array.from(table.querySelectorAll('thead tr, tbody tr'))
+                .filter(tr => tr.parentElement.tagName === 'THEAD' || tr.style.display !== 'none');
+            const data = rows.map(tr => Array.from(tr.querySelectorAll('th, td'))
+                .map(td => '"' + (td.innerText || '').replace(/"/g, '""') + '"').join(','));
+            const csv = data.join('\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
         
         // Function to download sample CSV
         function downloadSampleCSV() {
@@ -1149,20 +1188,5 @@ if (isset($_SESSION['bulk_errors'])) {
             document.body.removeChild(link);
         }
     </script>
-</body>
-</html>
-
-
-
-indha code la filter work aagala andha filter ah correct pani kudu
-
-" code between  and  in the most up-to-date Canvas "admin/manage_users.php (Updated)" document above and am asking a query about/based on this code below.
-Instructions to follow:
-  * Don't output/edit the document if the query is Direct/Simple. For example, if the query asks for a simple explanation, output a direct answer.
-  * Make sure to **edit** the document if the query shows the intent of editing the document, in which case output the entire edited document, **not just that section or the edits**.
-    * Don't output the same document/empty document and say that you have edited it.
-    * Don't change unrelated code in the document.
-  * Don't output  and  in your final response.
-  * Any references like "this" or "selected code" refers to the code between  and  tags.
-  * Just acknowledge my request in the introduction.
-  * Make sure to refer to the document as "Canvas" in your response.
+    </body>
+    </html>

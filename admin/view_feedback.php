@@ -48,12 +48,24 @@ $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_c
 
 // Fetch data based on view type
 if ($view_type === 'feedback') {
-    // Original feedback view query
-    $sql = "SELECT f.department, f.year, f.semester, fac.name as faculty_name, fr.question, s.name as student_name, s.sin_number, fr.rating
-    FROM feedback_responses fr
-    JOIN feedback_forms f ON fr.form_id = f.id
-    JOIN students s ON fr.student_id = s.id
-    JOIN faculty fac ON fr.faculty_id = fac.id";
+    // Accurate feedback view: join by form_number and resolve question text via form_questions when present
+    $sql = "SELECT 
+                f.department, f.year, f.semester,
+                fac.name AS faculty_name,
+                COALESCE(fq.question_text, f.question) AS question,
+                s.name AS student_name, s.sin_number,
+                fr.rating,
+                fr.form_number,
+                fr.subject_code
+            FROM feedback_responses fr
+            JOIN feedback_forms f 
+              ON fr.form_number = f.form_number
+             AND fr.subject_code = f.subject_code
+             AND fr.faculty_id = f.faculty_id
+            LEFT JOIN form_questions fq
+              ON fq.form_number = fr.form_number AND fq.id = fr.question_id
+            JOIN students s ON fr.student_id = s.id
+            JOIN faculty fac ON fr.faculty_id = fac.id";
     if ($where_clause) $sql .= ' ' . $where_clause;
     $sql .= ' ORDER BY f.department, f.year, f.semester, fac.name, s.name';
     
@@ -68,19 +80,19 @@ if ($view_type === 'feedback') {
 } elseif ($view_type === 'forms') {
     // Forms view query
     $forms_query = "SELECT 
-        f.id,
-        f.subject_code,
+        f.form_number,
         f.department,
         f.year,
         f.semester,
-        f.created_at,
-        COUNT(fr.id) as response_count,
-        COUNT(DISTINCT fr.student_id) as unique_students
+        MIN(f.created_at) AS created_at,
+        COUNT(fr.id) AS response_count,
+        COUNT(DISTINCT fr.student_id) AS unique_students
         FROM feedback_forms f
-        LEFT JOIN feedback_responses fr ON f.id = fr.form_id
+        LEFT JOIN feedback_responses fr 
+          ON fr.form_number = f.form_number
         $where_clause
-        GROUP BY f.id
-        ORDER BY f.created_at DESC";
+        GROUP BY f.form_number, f.department, f.year, f.semester
+        ORDER BY created_at DESC";
     
     if (!empty($params)) {
         $stmt = $conn->prepare($forms_query);
@@ -577,6 +589,8 @@ $analytics_data = [];
 </head>
 
 <body>
+    <?php include __DIR__ . '/includes/sidebar.php'; ?>
+    <div style="margin-left: 280px;">
     <!-- HEADER -->
     <header class="header">
         <div class="header-container">
@@ -638,8 +652,8 @@ $analytics_data = [];
                 $total_students = $result->fetch_assoc()['total_students'];
             }
             
-            // 2. Total forms created for selected criteria
-            $forms_sql = "SELECT COUNT(f.id) as total_forms FROM feedback_forms f WHERE 1=1";
+            // 2. Total forms created for selected criteria (distinct form numbers)
+            $forms_sql = "SELECT COUNT(DISTINCT f.form_number) as total_forms FROM feedback_forms f WHERE 1=1";
             $form_params = [];
             if (!empty($selected_department)) {
                 $forms_sql .= " AND f.department = ?";
@@ -664,10 +678,10 @@ $analytics_data = [];
                 $total_forms = $result->fetch_assoc()['total_forms'];
             }
             
-            // 3. Total responses for selected criteria
+            // 3. Total responses for selected criteria (join by form_number)
             $responses_sql = "SELECT COUNT(fr.id) as total_responses 
                               FROM feedback_responses fr 
-                              JOIN feedback_forms f ON fr.form_id = f.id 
+                              JOIN feedback_forms f ON fr.form_number = f.form_number 
                               WHERE 1=1";
             $response_params = [];
             if (!empty($selected_department)) {
@@ -717,7 +731,7 @@ $analytics_data = [];
                     SUM(CASE WHEN fr.rating = 2 THEN 1 ELSE 0 END) as fair_2,
                     SUM(CASE WHEN fr.rating = 1 THEN 1 ELSE 0 END) as need_improvement_1
                     FROM feedback_responses fr
-                    JOIN feedback_forms f ON fr.form_id = f.id
+                    JOIN feedback_forms f ON fr.form_number = f.form_number
                     WHERE 1=1";
                 
                 $analytics_params = [];
@@ -1304,5 +1318,6 @@ $analytics_data = [];
             }
         });
     </script>
+    </div>
 </body>
 </html>

@@ -144,25 +144,47 @@ try {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <title>Manage Feedback Forms - Admin Portal</title>
     <style>
+        :root {
+            --primary-50: #eff6ff;
+            --primary-500: #3b82f6;
+            --primary-600: #2563eb;
+            --danger-100: #fee2e2;
+            --danger-500: #dc2626;
+            --danger-600: #b91c1c;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-800: #1f2937;
+            --heading-color: #111827;
+            --text-color: #4b5563;
+            --sidebar-bg: #ffffff;
+            --border-color: #e5e7eb;
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.06);
+            --radius-lg: 12px;
+            --sidebar-width: 280px;
+        }
         *{
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
-     body {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background-color: #f8fafc;
-    color: #334155;
-    line-height: 1.6;
-    /* Add these for sticky footer */
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-}
+        
+        body {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f8fafc;
+            color: #334155;
+            line-height: 1.6;
+            /* Add these for sticky footer */
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
         /* Header */
         .header {
             background: white;
@@ -250,6 +272,11 @@ try {
             background: #fef2f2;
             color: #dc2626;
         }
+
+        /* Layout */
+        .admin-layout { display: flex; }
+        #sidebar { width: var(--sidebar-width) !important; flex: 0 0 var(--sidebar-width); }
+        .main-content { margin-left: var(--sidebar-width); flex: 1; display: flex; flex-direction: column; }
 
         /* Main Container */
         .container {
@@ -836,6 +863,9 @@ try {
     </style>
 </head>
 <body>
+    <div class="admin-layout">
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
+        <main class="main-content">
     <!-- Header -->
     <header class="header">
         <div class="header-container">
@@ -992,6 +1022,7 @@ try {
                 </a>
             </div>
         </div>
+        </main>
     </div>
 
     <!-- Modal for Form Details -->
@@ -1115,6 +1146,7 @@ try {
             }
         });
     </script>
+    </div>
 </body>
 </html>
 

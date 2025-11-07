@@ -607,42 +607,7 @@ if ($show_data) {
 <body>
     <div class="admin-layout">
         <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <a href="dashboard.php" style="text-decoration: none;">
-                    <div class="sidebar-logo">
-                        <i class="fas fa-graduation-cap"></i>
-                        <div>
-                            <div>College Feedback</div>
-                            <div class="sidebar-subtitle">Admin Panel</div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="nav-section">
-                    <div class="nav-section-title">Main</div>
-                    <a href="dashboard.php" class="nav-item"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-                    <a href="analytics.php" class="nav-item active"><i class="fas fa-chart-bar"></i> Analytics</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">Management</div>
-                    <a href="manage_users.php" class="nav-item"><i class="fas fa-users"></i> Users</a>
-                    <a href="manage_forms.php" class="nav-item"><i class="fas fa-file-alt"></i> Manage Forms</a>
-                    <a href="form_reports.php" class="nav-item"><i class="fas fa-chart-line"></i> Form Reports</a>
-                    <a href="view_feedback.php" class="nav-item"><i class="fas fa-comments"></i> View Feedback</a>
-                    <a href="student_feedback_list.php" class="nav-item"><i class="fas fa-user-graduate"></i> Student Data</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">System</div>
-                    <a href="#" class="nav-item"><i class="fas fa-cog"></i> Settings</a>
-                    <a href="../includes/logout.php" class="nav-item danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                </div>
-            </div>
-        </nav>
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
         <!-- Main Content -->
         <main class="main-content">

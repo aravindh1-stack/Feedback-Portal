@@ -44,6 +44,10 @@
         <input type="text" maxlength="1" class="form-control otp-input" style="width:44px; text-align:center; padding-left: 0.75rem;" id="d5" name="d5">
         <input type="text" maxlength="1" class="form-control otp-input" style="width:44px; text-align:center; padding-left: 0.75rem;" id="d6" name="d6">
       </div>
+      <div style="text-align:center; margin-top:.75rem;">
+        <a href="#" id="resendOtpLink" style="color:#4f46e5; font-weight:600; text-decoration:none;">Resend OTP</a>
+        <span id="resendStatus" style="display:block; font-size:.85rem; color:#6b7280; margin-top:.25rem;"></span>
+      </div>
     </div>
 
     <button type="submit" class="login-btn" id="loginBtn">

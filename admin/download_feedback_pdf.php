@@ -67,31 +67,39 @@ function getGradeDetails(float $percentage): array
 
 function fetchReportData(mysqli $conn, array $filters): array
 {
-    // --- IMPORTANT ---
-    // This is a placeholder function. You must adapt the SQL queries below.
-    
-    // Query for summary
+    // Accurate summary: filter by department/year/semester from feedback_forms
     $summary_sql = "SELECT 
-        (SELECT COUNT(DISTINCT s.id) FROM students s WHERE s.department = ? AND s.year = ? AND s.semester = ?) as class_strength,
-        COUNT(DISTINCT resp.student_id) as forms_submitted,
-        AVG(resp.rating) as average_rating
-        FROM feedback_responses resp JOIN students s ON resp.student_id = s.id
-        WHERE s.department = ? AND s.year = ? AND s.semester = ?";
+        (SELECT COUNT(DISTINCT s.id) FROM students s WHERE s.department = ? AND s.year = ? AND s.semester = ?) AS class_strength,
+        (SELECT COUNT(DISTINCT f2.form_number) FROM feedback_forms f2 WHERE f2.department = ? AND f2.year = ? AND f2.semester = ?) AS forms_submitted,
+        COALESCE(AVG(fr.rating), 0) AS average_rating,
+        COUNT(fr.id) AS total_responses
+        FROM feedback_responses fr 
+        JOIN feedback_forms f ON fr.form_number = f.form_number
+        WHERE f.department = ? AND f.year = ? AND f.semester = ?";
     $stmt = $conn->prepare($summary_sql);
-    $stmt->bind_param("ssisss", $filters['department'], $filters['year'], $filters['semester'], $filters['department'], $filters['year'], $filters['semester']);
+    $stmt->bind_param(
+        "sssssssss",
+        $filters['department'], $filters['year'], $filters['semester'],
+        $filters['department'], $filters['year'], $filters['semester'],
+        $filters['department'], $filters['year'], $filters['semester']
+    );
     $stmt->execute();
-    $summary = $stmt->get_result()->fetch_assoc();
+    $summary = $stmt->get_result()->fetch_assoc() ?: ['class_strength'=>0,'forms_submitted'=>0,'average_rating'=>0,'total_responses'=>0];
 
-    // Query for subject details
-    $details_sql = "SELECT f.subject_code, fac.name as faculty_name, AVG(fr.rating) as avg_rating
+    // Subject-wise details: join by form_number and group by subject + faculty
+    $details_sql = "SELECT 
+            f.subject_code,
+            COALESCE(fac.name, CONCAT('Faculty #', fr.faculty_id)) AS faculty_name,
+            AVG(fr.rating) AS avg_rating
         FROM feedback_responses fr
-        JOIN feedback_forms f ON fr.form_id = f.id
-        JOIN students s ON fr.student_id = s.id
-        JOIN faculty fac ON f.faculty_id = fac.id
-        WHERE s.department = ? AND s.year = ? AND s.semester = ?
-        GROUP BY f.subject_code, fac.name";
+        JOIN feedback_forms f ON fr.form_number = f.form_number 
+            AND fr.subject_code = f.subject_code AND fr.faculty_id = f.faculty_id
+        LEFT JOIN faculty fac ON fr.faculty_id = fac.id
+        WHERE f.department = ? AND f.year = ? AND f.semester = ?
+        GROUP BY f.subject_code, fr.faculty_id, fac.name
+        ORDER BY f.subject_code";
     $stmt = $conn->prepare($details_sql);
-    $stmt->bind_param("ssi", $filters['department'], $filters['year'], $filters['semester']);
+    $stmt->bind_param("sss", $filters['department'], $filters['year'], $filters['semester']);
     $stmt->execute();
     $details_result = $stmt->get_result();
     
@@ -260,9 +268,9 @@ function drawSubjectDetailsSection(FPDF $pdf, array $details) {
 
 try {
     $filters = [
-        'department' => $_GET['dept'] ?? 'ECE',
+        'department' => $_GET['dept'] ?? $_GET['department'] ?? 'ECE',
         'year'       => $_GET['year'] ?? '2',
-        'semester'   => $_GET['sem'] ?? '3',
+        'semester'   => $_GET['sem'] ?? $_GET['semester'] ?? '3',
     ];
 
     $reportData = fetchReportData($conn, $filters);

@@ -13,6 +13,8 @@ if (!isset($_SESSION['otp_code'], $_SESSION['otp_expires'], $_SESSION['pending_u
 
 $d = fn($k) => isset($_POST[$k]) ? (string)$_POST[$k] : '';
 $code = $d('d1').$d('d2').$d('d3').$d('d4').$d('d5').$d('d6');
+// Normalize to digits-only string to avoid whitespace/unicode issues
+$code = preg_replace('/\D/', '', $code ?? '');
 
 if (strlen($code) !== 6 || !ctype_digit($code)) {
   echo json_encode(['success' => false, 'message' => 'Invalid code']);
@@ -24,7 +26,9 @@ if (time() > $_SESSION['otp_expires']) {
   exit;
 }
 
-if ($code !== $_SESSION['otp_code']) {
+// Ensure session code is treated as a string
+$sessionCode = isset($_SESSION['otp_code']) ? (string)$_SESSION['otp_code'] : '';
+if ($code !== $sessionCode) {
   echo json_encode(['success' => false, 'message' => 'Incorrect OTP']);
   exit;
 }
@@ -32,6 +36,12 @@ if ($code !== $_SESSION['otp_code']) {
 // Complete login
 $_SESSION['user'] = $_SESSION['pending_user'];
 $_SESSION['role'] = $_SESSION['pending_role'];
+// Set role-specific session ids for downstream APIs
+if ($_SESSION['role'] === 'student') {
+  if (isset($_SESSION['user']['id'])) { $_SESSION['student_id'] = (int)$_SESSION['user']['id']; }
+} elseif ($_SESSION['role'] === 'faculty') {
+  if (isset($_SESSION['user']['id'])) { $_SESSION['faculty_id'] = (int)$_SESSION['user']['id']; }
+}
 unset($_SESSION['otp_code'], $_SESSION['otp_expires'], $_SESSION['pending_user'], $_SESSION['pending_role'], $_SESSION['otp_email']);
 
 $role = $_SESSION['role'];
