@@ -1,6 +1,6 @@
     <?php
 // AJAX: resend OTP to the email stored in session
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 error_reporting(E_ALL);
 header('Content-Type: application/json');
 
@@ -48,5 +48,9 @@ try {
   }
   unset($_SESSION['otp_sending']);
 } catch (Throwable $e) {
+  $logDir = __DIR__ . '/../logs';
+  if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+  $msg = '[' . date('Y-m-d H:i:s') . '] resend_otp error: ' . $e->getMessage() . "\n";
+  @file_put_contents($logDir . '/app.log', $msg, FILE_APPEND);
   echo json_encode(['success' => false, 'message' => 'Server error. Please try again.']);
 }

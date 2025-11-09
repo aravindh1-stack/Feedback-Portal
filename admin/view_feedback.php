@@ -19,7 +19,7 @@ $view_type = $_GET['view'] ?? 'feedback'; // feedback, analytics, forms
 $departments_query = "SELECT DISTINCT department FROM feedback_forms ORDER BY department";
 $departments_result = $conn->query($departments_query);
 $departments = [];
-while ($row = $departments_result->fetch_assoc()) {
+while ($departments_result && $row = $departments_result->fetch_assoc()) {
     $departments[] = $row['department'];
 }
 
@@ -32,51 +32,107 @@ $total_responses = 0;
 // Build WHERE conditions
 $where_conditions = [];
 $params = [];
+$types = '';
 if (!empty($selected_department)) {
     $where_conditions[] = "f.department = ?";
     $params[] = $selected_department;
+    $types .= 's';
 }
 if (!empty($selected_year)) {
     $where_conditions[] = "f.year = ?";
     $params[] = $selected_year;
+    $types .= 's';
 }
 if (!empty($selected_semester)) {
     $where_conditions[] = "f.semester = ?";
     $params[] = $selected_semester;
+    $types .= 's';
 }
 $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
 
+// --- Start Stat Calculation (Moved to top) ---
+try {
+    // 1. Total students
+    $students_sql = "SELECT COUNT(DISTINCT s.id) as total_students FROM students s";
+    $student_params = [];
+    $student_types = '';
+    $student_where = [];
+    if (!empty($selected_department)) {
+        $student_where[] = "s.department = ?";
+        $student_params[] = $selected_department;
+        $student_types .= 's';
+    }
+    if (!empty($selected_year)) {
+        $student_where[] = "s.year = ?";
+        $student_params[] = $selected_year;
+        $student_types .= 's';
+    }
+    if (!empty($selected_semester)) {
+        $student_where[] = "s.semester = ?";
+        $student_params[] = $selected_semester;
+        $student_types .= 's';
+    }
+    if (!empty($student_where)) $students_sql .= ' WHERE ' . implode(' AND ', $student_where);
+    
+    $stmt = $conn->prepare($students_sql);
+    if (!empty($student_params)) {
+        $stmt->bind_param($student_types, ...$student_params);
+    }
+    $stmt->execute();
+    $total_students = $stmt->get_result()->fetch_assoc()['total_students'] ?? 0;
+
+    // 2. Total forms
+    $forms_sql = "SELECT COUNT(DISTINCT f.form_number) as total_forms FROM feedback_forms f $where_clause";
+    $stmt = $conn->prepare($forms_sql);
+    if (!empty($params)) {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $total_forms = $stmt->get_result()->fetch_assoc()['total_forms'] ?? 0;
+    
+    // 3. Total responses
+    $responses_sql = "SELECT COUNT(fr.id) as total_responses 
+                      FROM feedback_responses fr 
+                      JOIN feedback_forms f ON fr.form_number = f.form_number 
+                      $where_clause";
+    $stmt = $conn->prepare($responses_sql);
+    if (!empty($params)) {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $total_responses_stat = $stmt->get_result()->fetch_assoc()['total_responses'] ?? 0;
+    
+    $stats = [
+        'total_students' => $total_students,
+        'total_forms' => $total_forms,
+        'total_responses' => $total_responses_stat
+    ];
+} catch (Exception $e) {
+    $stats = ['total_students' => 0, 'total_forms' => 0, 'total_responses' => 0];
+    $error_message = "Error fetching stats: " . $e->getMessage();
+}
+// --- End Stat Calculation ---
+
+
 // Fetch data based on view type
 if ($view_type === 'feedback') {
-    // Accurate feedback view: join by form_number and resolve question text via form_questions when present
-    $sql = "SELECT 
-                f.department, f.year, f.semester,
-                fac.name AS faculty_name,
-                COALESCE(fq.question_text, f.question) AS question,
-                s.name AS student_name, s.sin_number,
-                fr.rating,
-                fr.form_number,
-                fr.subject_code
-            FROM feedback_responses fr
-            JOIN feedback_forms f 
-              ON fr.form_number = f.form_number
-             AND fr.subject_code = f.subject_code
-             AND fr.faculty_id = f.faculty_id
-            LEFT JOIN form_questions fq
-              ON fq.form_number = fr.form_number AND fq.id = fr.question_id
+    $sql = "SELECT DISTINCT s.id, s.name, s.sin_number, s.department, s.year, s.semester 
+            FROM feedback_responses fr 
             JOIN students s ON fr.student_id = s.id
-            JOIN faculty fac ON fr.faculty_id = fac.id";
-    if ($where_clause) $sql .= ' ' . $where_clause;
-    $sql .= ' ORDER BY f.department, f.year, f.semester, fac.name, s.name';
+            JOIN feedback_forms f ON fr.form_number = f.form_number
+            $where_clause
+            ORDER BY s.name";
     
+    $stmt = $conn->prepare($sql);
     if (!empty($params)) {
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param(str_repeat('s', count($params)), ...$params);
-        $stmt->execute();
-        $result = $stmt->get_result();
-    } else {
-        $result = $conn->query($sql);
+        $stmt->bind_param($types, ...$params);
     }
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($result && $row = $result->fetch_assoc()) {
+        $feedback_data[] = $row;
+    }
+    
 } elseif ($view_type === 'forms') {
     // Forms view query
     $forms_query = "SELECT 
@@ -84,1240 +140,1358 @@ if ($view_type === 'feedback') {
         f.department,
         f.year,
         f.semester,
+        MIN(f.id) as form_id, -- Get the MIN ID for deletion reference
         MIN(f.created_at) AS created_at,
-        COUNT(fr.id) AS response_count,
-        COUNT(DISTINCT fr.student_id) AS unique_students
+        (SELECT COUNT(DISTINCT fr.student_id) FROM feedback_responses fr WHERE fr.form_number = f.form_number) as response_count
         FROM feedback_forms f
-        LEFT JOIN feedback_responses fr 
-          ON fr.form_number = f.form_number
         $where_clause
         GROUP BY f.form_number, f.department, f.year, f.semester
         ORDER BY created_at DESC";
     
+    $stmt = $conn->prepare($forms_query);
     if (!empty($params)) {
-        $stmt = $conn->prepare($forms_query);
-        $stmt->bind_param(str_repeat('s', count($params)), ...$params);
-        $stmt->execute();
-        $forms_result = $stmt->get_result();
-        while ($row = $forms_result->fetch_assoc()) {
-            $forms_data[] = $row;
-            $total_responses += $row['response_count'];
-        }
-    } else {
-        $forms_result = $conn->query($forms_query);
-        while ($row = $forms_result->fetch_assoc()) {
-            $forms_data[] = $row;
-            $total_responses += $row['response_count'];
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $forms_result = $stmt->get_result();
+    while ($forms_result && $row = $forms_result->fetch_assoc()) {
+        $forms_data[] = $row;
+    }
+
+} elseif ($view_type === 'analytics') {
+    if ($stats['total_responses'] > 0) {
+        $analytics_query = "SELECT 
+                COALESCE(fq.question_text, f.question) AS question,
+                AVG(fr.rating) as avg_rating,
+                COUNT(fr.id) as response_count,
+                SUM(CASE WHEN fr.rating = 5 THEN 1 ELSE 0 END) as excellent_5,
+                SUM(CASE WHEN fr.rating = 4 THEN 1 ELSE 0 END) as good_4,
+                SUM(CASE WHEN fr.rating = 3 THEN 1 ELSE 0 END) as average_3,
+                SUM(CASE WHEN fr.rating = 2 THEN 1 ELSE 0 END) as fair_2,
+                SUM(CASE WHEN fr.rating = 1 THEN 1 ELSE 0 END) as need_improvement_1
+                FROM feedback_responses fr
+                JOIN feedback_forms f 
+                    ON fr.form_number = f.form_number
+                    AND fr.subject_code = f.subject_code
+                    AND fr.faculty_id = f.faculty_id
+                LEFT JOIN form_questions fq
+                    ON fq.form_number = fr.form_number AND fq.id = fr.question_id
+                $where_clause
+                GROUP BY COALESCE(fq.question_text, f.question)
+                ORDER BY response_count DESC";
+
+        try {
+            $stmt = $conn->prepare($analytics_query);
+            if (!empty($params)) {
+                $stmt->bind_param($types, ...$params);
+            }
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($result && $row = $result->fetch_assoc()) {
+                $analytics_data[] = $row;
+            }
+        } catch (Exception $e) {
+             $error_message = "Error fetching analytics: " . $e->getMessage();
         }
     }
 }
 
-// Initialize analytics data
-$analytics_data = [];
+// Session message check
+if (isset($_SESSION['message'])) {
+    $message = $_SESSION['message'];
+    $message_type = $_SESSION['message_type'];
+    unset($_SESSION['message']);
+    unset($_SESSION['message_type']);
+}
+
+// AJAX: Get all questions for a form number
+if (isset($_GET['action']) && $_GET['action'] === 'get_form_details') {
+    header('Content-Type: application/json');
+    if (!isset($_GET['form_number']) || empty($_GET['form_number'])) {
+        echo json_encode(['success' => false, 'error' => 'Form number is required']);
+        exit();
+    }
+    $form_number = trim($_GET['form_number']);
+    try {
+        // Intha query la oru chinna optimization: DISTINCT use pannalam
+        $stmt = $conn->prepare("SELECT DISTINCT question FROM feedback_forms WHERE form_number = ? ORDER BY id");
+        $stmt->bind_param("s", $form_number);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $questions = [];
+        while ($row = $result->fetch_assoc()) {
+            $questions[] = $row['question'];
+        }
+        
+        // Form details-a yum eduthukalam
+        $stmt_details = $conn->prepare("SELECT department, year, semester FROM feedback_forms WHERE form_number = ? LIMIT 1");
+        $stmt_details->bind_param("s", $form_number);
+        $stmt_details->execute();
+        $details_result = $stmt_details->get_result();
+        $details = $details_result->fetch_assoc();
+
+        $stmt->close();
+        $stmt_details->close();
+        
+        echo json_encode([
+            'success' => true,
+            'form' => [
+                'form_number' => $form_number,
+                'department' => $details['department'] ?? 'N/A',
+                'year' => $details['year'] ?? 'N/A',
+                'semester' => $details['semester'] ?? 'N/A',
+                'questions' => $questions,
+                'total_questions' => count($questions)
+            ]
+        ]);
+        exit();
+    } catch (Exception $e) {
+        error_log("Error in get_form_details: " . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Unable to load questions. Please try again.']);
+        exit();
+    }
+}
+
+
+// Handle delete request
+if (isset($_POST['delete_form_id'])) {
+    $form_id_to_delete = intval($_POST['delete_form_id']); // This ID is the MIN(id) from the form
+    
+    // We need the form_number to delete all related entries, not just one ID
+    $stmt_get_num = $conn->prepare("SELECT form_number FROM feedback_forms WHERE id = ?");
+    $stmt_get_num->bind_param("i", $form_id_to_delete);
+    $stmt_get_num->execute();
+    $result_num = $stmt_get_num->get_result();
+    $form_data = $result_num->fetch_assoc();
+    
+    if ($form_data) {
+        $form_number_to_delete = $form_data['form_number'];
+        
+        try {
+            $conn->begin_transaction();
+
+            // 1. Get all form IDs with this form_number
+            $form_ids = [];
+            $stmt_ids = $conn->prepare("SELECT id FROM feedback_forms WHERE form_number = ?");
+            $stmt_ids->bind_param("s", $form_number_to_delete);
+            $stmt_ids->execute();
+            $result_ids = $stmt_ids->get_result();
+            while($row = $result_ids->fetch_assoc()) {
+                $form_ids[] = $row['id'];
+            }
+            $stmt_ids->close();
+
+            if (!empty($form_ids)) {
+                $placeholders = implode(',', array_fill(0, count($form_ids), '?'));
+                $types = str_repeat('i', count($form_ids));
+
+                // 2. Delete related responses first
+                $delete_responses = $conn->prepare("DELETE FROM feedback_responses WHERE form_id IN ($placeholders)");
+                $delete_responses->bind_param($types, ...$form_ids);
+                $delete_responses->execute();
+                $delete_responses->close();
+                
+                // 3. Delete from form_questions table
+                $delete_fq = $conn->prepare("DELETE FROM form_questions WHERE form_number = ?");
+                $delete_fq->bind_param("s", $form_number_to_delete);
+                $delete_fq->execute();
+                $delete_fq->close();
+
+                // 4. Delete all form entries from feedback_forms
+                $delete_form = $conn->prepare("DELETE FROM feedback_forms WHERE form_number = ?");
+                $delete_form->bind_param("s", $form_number_to_delete);
+                $delete_form->execute();
+                
+                if ($delete_form->affected_rows > 0) {
+                    $conn->commit();
+                    $_SESSION['message'] = "Form ($form_number_to_delete) and all its related data deleted successfully!";
+                    $_SESSION['message_type'] = 'success';
+                } else {
+                    $conn->rollback();
+                    $_SESSION['message'] = 'Form not found or could not be deleted.';
+                    $_SESSION['message_type'] = 'error';
+                }
+                $delete_form->close();
+            } else {
+                 $conn->rollback();
+                 $_SESSION['message'] = 'Form not found.';
+                 $_SESSION['message_type'] = 'error';
+            }
+        } catch (Exception $e) {
+            $conn->rollback();
+            $_SESSION['message'] = 'Error deleting form: '. $e->getMessage();
+            $_SESSION['message_type'] = 'error';
+            error_log("Delete form error: " . $e->getMessage());
+        }
+    } else {
+        $_SESSION['message'] = 'Could not find form to delete.';
+        $_SESSION['message_type'] = 'error';
+    }
+    
+    $stmt_get_num->close();
+    header("Location: view_feedback.php?" . http_build_query($_GET)); // Stay on the same filtered view
+    exit();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>View Feedback - Admin Portal</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <title>View Feedback - Aarasys</title>
+
+    <link rel="icon" type="image/x-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzQzMzhDMyIvPgo8cGF0aCBkPSJNOCAxMkg5VjIwSDhWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTEgMTJIMTJWMjBIMTFWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTQgMTJIMTVWMjBIMTRWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
+        /* === NEW DESIGN STYLES (FROM manage_users.php) === */
+
+        /* 1. CSS Variables (Theme) */
         :root {
-            --primary-color: #2563eb;
-            --primary-dark: #1d4ed8;
-            --primary-light: #3b82f6;
-            --secondary-color: #64748b;
-            --success-color: #059669;
-            --warning-color: #d97706;
-            --danger-color: #dc2626;
-            --gray-50: #f8fafc;
-            --gray-100: #f1f5f9;
-            --gray-200: #e2e8f0;
-            --gray-300: #cbd5e1;
-            --gray-400: #94a3b8;
-            --gray-500: #64748b;
-            --gray-600: #475569;
-            --gray-700: #334155;
-            --gray-800: #1e293b;
-            --gray-900: #0f172a;
-            --white: #ffffff;
-            --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-            --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-            --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+            /* Palette */
+            --primary-blue: #3b82f6; 
+            --primary-purple: #6366F1;
+            --dark-bg: #1f2937;
+            --light-bg: #f8f9fa;    /* <-- "Dim White" Page Background */
+            --card-bg: #ffffff;     /* <-- White Card Background */
+            --border-color: #e5e7eb;
+            --text-dark: #111827;
+            --text-body: #4b5563;
+            --text-light: #f9fafb;
+            --text-muted: #9ca3af;
+            --text-blue: #2563eb;
+            --success-bg: #dcfce7;
+            --success-text: #16a34a;
+            --danger-bg: #fee2e2;
+            --danger-text: #dc2626;
+            --info-bg: #eff6ff;
+            --info-text: #2563eb;
+            --warning-bg: #fef3c7;
+            --warning-text: #d97706;
+            
+            /* Sizing & Spacing */
+            --sidebar-width: 280px;
+            --header-height: 88px;
+            --radius-sm: 0.375rem; --radius-md: 0.5rem; --radius-lg: 0.75rem;
+            --radius-xl: 1rem; --radius-2xl: 1.5rem; --radius-full: 9999px;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+        }
+        
+        /* Dark Theme */
+        body.dark-theme {
+            --light-bg: #111827;
+            --card-bg: #1f2937;
+            --border-color: #374151;
+            --text-dark: #f9fafb;
+            --text-body: #9ca3af;
+            --text-muted: #6b7280;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
+        /* 2. Base & Reset */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--gray-50);
-            color: var(--gray-900);
-            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            background-color: var(--light-bg);
+            color: var(--text-body);
+            -webkit-font-smoothing: antialiased;
+            transition: background-color 0.3s ease;
+        }
+        
+        a { text-decoration: none; color: inherit; }
+        button { font-family: inherit; }
+
+        /* 3. Main Layout */
+        .admin-layout { display: flex; }
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
             display: flex;
             flex-direction: column;
-            line-height: 1.6;
-            font-weight: 400;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            min-height: 100vh;
+            transition: margin-left 0.3s ease; /* Sidebar collapse animation */
+        }
+        body.sidebar-collapsed .main-content {
+            margin-left: 92px; /* Collapsed sidebar width */
+        }
+        .content-area {
+            padding: 2rem 2.5rem;
+            flex: 1;
         }
 
-        /* HEADER */
+        /* 4. Header (Topbar) */
         .header {
-            background: var(--white);
-            border-bottom: 1px solid var(--gray-200);
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            backdrop-filter: blur(8px);
-            background-color: rgba(255, 255, 255, 0.95);
-        }
-
-        .header-container {
-            max-width: 1280px;
-            margin: 0 auto;
-            padding: 0 2rem;
+            height: var(--header-height);
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            height: 4rem;
+            padding: 0 2.5rem;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
+        .header-title {
+            font-size: 1.75rem; 
             font-weight: 700;
-            font-size: 1.25rem;
-            color: var(--gray-900);
-            text-decoration: none;
+            color: var(--text-dark);
         }
-
-        .logo-icon {
-            width: 2rem;
-            height: 2rem;
-            background: var(--primary-color);
-            border-radius: 0.5rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--white);
+        .header-actions { display: flex; align-items: center; gap: 1rem; }
+        .search-wrapper { position: relative; }
+        .search-wrapper i {
+            position: absolute; left: 1rem; top: 50%;
+            transform: translateY(-50%); color: var(--text-muted);
         }
-
-        .nav-menu {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
+        .search-input {
+            padding: 0.75rem 1rem 0.75rem 2.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background-color: var(--light-bg);
+            font-size: 0.9rem;
+            width: 280px;
+            transition: all 0.2s ease;
         }
-
-        .nav-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            font-weight: 500;
-            font-size: 0.875rem;
-            color: var(--gray-600);
-            text-decoration: none;
-            transition: all 0.15s ease;
+        .search-input:focus {
+            outline: none; border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            background-color: var(--card-bg);
         }
-
-        .nav-link:hover {
-            background-color: var(--gray-100);
-            color: var(--gray-900);
+        .header-btn {
+            width: 44px; height: 44px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background-color: var(--card-bg);
+            display: grid; place-items: center;
+            font-size: 1.1rem; color: var(--text-body);
+            cursor: pointer; transition: all 0.2s ease;
         }
-
-        .nav-link.active {
-            background-color: var(--primary-color);
-            color: var(--white);
-        }
-
-        .mobile-menu-button {
-            display: none;
-            background: none;
-            border: none;
-            padding: 0.5rem;
-            color: var(--gray-600);
-            border-radius: 0.375rem;
+        .header-btn:hover { border-color: var(--primary-blue); color: var(--primary-blue); }
+        .user-avatar {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            background-color: var(--primary-purple);
+            color: var(--text-light);
+            display: grid; place-items: center;
+            font-weight: 600; font-size: 1.1rem;
+            border: 2px solid var(--card-bg);
+            box-shadow: 0 0 0 2px var(--primary-purple);
             cursor: pointer;
         }
-
-        /* MAIN CONTENT */
-        .main-content {
-            flex: 1;
-            max-width: 1280px;
-            width: 100%;
-            margin: 0 auto;
-            padding: 2rem 1.5rem;
+        
+        body.dark-theme .header-btn {
+            background-color: var(--card-bg);
+            border-color: var(--border-color);
+            color: var(--text-body);
+        }
+        body.dark-theme .header-btn:hover { border-color: var(--primary-blue); color: var(--primary-blue); }
+        body.dark-theme .search-input {
+             background-color: var(--light-bg);
+             border-color: var(--border-color);
         }
 
-        .page-header {
-            margin-bottom: 2rem;
+        /* 5. Buttons */
+        .btn {
+            display: inline-flex; align-items: center;
+            gap: 0.5rem; padding: 0.65rem 1rem;
+            border-radius: var(--radius-md);
+            font-weight: 600; text-decoration: none;
+            border: none; cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
         }
-
-        .page-title {
-            font-size: 1.875rem;
-            font-weight: 700;
-            color: var(--gray-900);
-            margin-bottom: 0.5rem;
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
         }
-
-        .page-subtitle {
-            color: var(--gray-600);
-            font-size: 1rem;
-        }
-
-        /* FILTER CARD */
-        .filter-card {
-            background: white;
-            border-radius: 0.75rem;
-            border: 1px solid var(--gray-200);
+        .btn-primary { background-color: var(--primary-blue); color: var(--text-light); }
+        .btn-primary:hover { background-color: var(--text-blue); box-shadow: var(--shadow-md); }
+        .btn-secondary {
+            background-color: var(--card-bg);
+            color: var(--text-body);
+            border: 1px solid var(--border-color);
             box-shadow: var(--shadow-sm);
-            padding: 2rem;
-            margin-bottom: 2rem;
+        }
+        .btn-secondary:hover { background-color: var(--light-bg); border-color: #d1d5db; }
+        .btn-danger { background-color: var(--danger-text); color: var(--text-light); }
+        .btn-danger:hover { background-color: #b91c1c; box-shadow: var(--shadow-md); }
+        body.dark-theme .btn-secondary {
+            background-color: var(--light-bg);
+            color: var(--text-body);
+            border-color: var(--border-color);
+        }
+        body.dark-theme .btn-secondary:hover { background-color: #374151; }
+
+        /* 6. Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+            padding-top: 1.5rem;
+        }
+        .tab-btn {
+            padding: 0.6rem 1.25rem;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-body);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+        .tab-btn.active, .tab-btn:hover {
+            background: var(--card-bg);
+            color: var(--primary-blue);
+            border-color: var(--primary-blue);
+            box-shadow: var(--shadow-sm);
+        }
+        .tab-btn.active {
+             background: var(--info-bg);
+        }
+        body.dark-theme .tab-btn {
+            background: var(--light-bg);
+            color: var(--text-body);
+            border-color: var(--border-color);
+        }
+        body.dark-theme .tab-btn.active, body.dark-theme .tab-btn:hover {
+            background-color: rgba(59, 130, 246, 0.1);
+            color: var(--primary-blue);
+            border-color: var(--primary-blue);
         }
 
-        .filter-title {
+        /* 7. Card */
+        .grid-card {
+            background-color: var(--card-bg);
+            border-radius: var(--radius-xl);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 1.5rem;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+        .grid-card-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            transition: border-color 0.3s ease;
+        }
+        .card-title {
             font-size: 1.25rem;
             font-weight: 600;
-            color: var(--gray-900);
+            color: var(--text-dark);
+        }
+        .grid-card-body {
+            padding: 0; /* Remove padding for full-width table */
+        }
+        .grid-card-body-padded {
+            padding: 1.5rem;
+        }
+
+        /* 8. Table */
+        .table-wrapper { overflow-x: auto; }
+        .user-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        .user-table th, .user-table td {
+            padding: 0.85rem 1.5rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+            transition: border-color 0.3s ease;
+        }
+        .user-table thead {
+            background-color: var(--light-bg);
+            transition: background-color 0.3s ease;
+        }
+        .user-table th {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .user-table tbody tr:hover {
+            background-color: var(--light-bg);
+        }
+        body.dark-theme .user-table tbody tr:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: var(--radius-full);
+            font-size: 0.8rem;
+            font-weight: 500;
+            background: var(--light-bg);
+            color: var(--text-body);
+            border: 1px solid var(--border-color);
+        }
+        .badge-blue { background-color: var(--info-bg); color: var(--info-text); border-color: transparent; }
+        .badge-green { background-color: var(--success-bg); color: var(--success-text); border-color: transparent; }
+        .badge-red { background-color: var(--danger-bg); color: var(--danger-text); border-color: transparent; }
+        
+        body.dark-theme .badge {
+            background-color: var(--light-bg);
+            color: var(--text-body);
+            border-color: var(--border-color);
+        }
+        body.dark-theme .badge-blue { background-color: rgba(59, 130, 246, 0.1); color: #60a5fa; }
+        body.dark-theme .badge-green { background-color: rgba(16, 185, 129, 0.1); color: #34d399; }
+        body.dark-theme .badge-red { background-color: rgba(239, 68, 68, 0.1); color: #f87171; }
+        
+        .action-buttons { display: flex; gap: 0.5rem; justify-content: flex-end; }
+        
+        /* 9. Modals */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(17, 24, 39, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 1001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .modal-overlay.active { display: flex; opacity: 1; }
+        .modal-content {
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: var(--radius-xl);
+            max-width: 600px;
+            width: 90%;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            transform: scale(0.95) translateY(10px);
+            transition: all 0.2s ease-out;
+        }
+        .modal-overlay.active .modal-content { transform: scale(1) translateY(0); }
+        .modal-close {
+            position: absolute; top: 0.75rem; right: 0.75rem;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: none; border: none;
+            font-size: 1.5rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: grid; place-items: center;
+            transition: all 0.2s ease;
+        }
+        .modal-close:hover { background-color: var(--light-bg); color: var(--text-dark); }
+        .modal-content h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-dark);
             margin-bottom: 1.5rem;
+        }
+        
+        /* 10. Loader */
+        .loader-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(5px);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        body.dark-theme .loader-overlay {
+             background: rgba(17, 24, 39, 0.7);
+        }
+        .loader-spinner {
+            border: 5px solid var(--border-color);
+            border-top: 5px solid var(--primary-blue);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* 11. NEW STYLES for this page */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card-new {
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 1rem;
         }
-
+        .stat-icon-new {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+        .stat-info-new .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-dark);
+            line-height: 1.2;
+        }
+        .stat-info-new .stat-label {
+            font-size: 0.9rem;
+            color: var(--text-body);
+        }
+        
+        /* No Data Placeholder */
+        .no-data-placeholder {
+            text-align: center;
+            padding: 3rem 1.5rem;
+        }
+        .no-data-placeholder i {
+            font-size: 3rem;
+            color: var(--text-muted);
+            opacity: 0.5;
+            margin-bottom: 1rem;
+        }
+        .no-data-placeholder h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 0.25rem;
+        }
+        .no-data-placeholder p {
+            color: var(--text-body);
+        }
+        
+        /* Filter Form */
         .filter-form {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
             align-items: end;
         }
-
         .form-group {
             display: flex;
             flex-direction: column;
+            gap: 0.5rem;
         }
-
         .form-label {
-            font-weight: 600;
-            color: var(--gray-700);
-            margin-bottom: 0.5rem;
-            font-size: 0.875rem;
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--text-dark);
         }
-
         .form-select {
             width: 100%;
-            padding: 0.75rem;
-            border: 2px solid var(--gray-200);
-            border-radius: 0.5rem;
-            font-size: 0.875rem;
+            padding: 0.65rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            background-color: var(--card-bg);
+            color: var(--text-body);
             transition: all 0.2s ease;
-            background: white;
-            color: var(--gray-900);
         }
-
         .form-select:focus {
             outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        body.dark-theme .form-select {
+            background-color: var(--light-bg);
+            border-color: var(--border-color);
+            color: var(--text-body);
         }
 
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 0.5rem;
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            justify-content: center;
+        /* View Form Modal Styles */
+        #viewFormModal .modal-content {
+            max-width: 700px;
         }
-
-        .btn-primary {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: var(--primary-dark);
-            transform: translateY(-1px);
-        }
-
-        .btn-success {
-            background: var(--success-color);
-            color: white;
-        }
-
-        .btn-success:hover {
-            background: #047857;
-            transform: translateY(-1px);
-        }
-
-        .btn-sm {
-            padding: 0.5rem 1rem;
-            font-size: 0.8rem;
-        }
-
-        /* DATA CARD */
-        .data-card {
-            background: white;
-            border-radius: 0.75rem;
-            border: 1px solid var(--gray-200);
-            box-shadow: var(--shadow-sm);
-            overflow: hidden;
-        }
-
-        .data-card-header {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-            padding: 1.5rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .data-card-title {
+        #viewFormModal h2 {
             font-size: 1.25rem;
-            font-weight: 600;
-            color: white;
+            margin-bottom: 0.5rem;
+        }
+        #viewFormModal .form-meta {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+        #viewFormModal .form-meta .badge {
+            margin: 0 0.25rem;
+        }
+        #viewFormModal .question-list {
+            max-height: 60vh;
+            overflow-y: auto;
+            padding: 0.5rem;
+            background: var(--light-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+        }
+        #viewFormModal .question-list ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #viewFormModal .question-list li {
+            padding: 0.75rem 1rem;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
             display: flex;
-            align-items: center;
-            gap: 0.5rem;
+            align-items: flex-start;
+            gap: 0.75rem;
         }
-
-        .download-btn {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(10px);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+        #viewFormModal .question-list li:last-child {
+            margin-bottom: 0;
         }
-
-        .download-btn:hover {
-            background: rgba(255, 255, 255, 0.25);
-            color: white;
-        }
-
-        /* TABLE */
-        .table-container {
-            overflow-x: auto;
-        }
-
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.875rem;
-        }
-
-        .data-table th {
-            background: var(--gray-50);
-            color: var(--gray-700);
-            font-weight: 600;
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 2px solid var(--gray-200);
+        #viewFormModal .question-list li strong {
             font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .data-table td {
-            padding: 1rem;
-            border-bottom: 1px solid var(--gray-200);
-            color: var(--gray-900);
-        }
-
-        .data-table tbody tr:hover {
-            background-color: var(--gray-50);
-        }
-
-        .no-data {
-            text-align: center;
-            padding: 3rem;
-            color: var(--gray-500);
-        }
-
-        .no-data i {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-            opacity: 0.5;
-        }
-
-        /* STATS CARDS */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            background: white;
-            border-radius: 0.75rem;
-            border: 1px solid var(--gray-200);
-            box-shadow: var(--shadow-sm);
-            padding: 1.5rem;
-            text-align: center;
-        }
-
-        .stat-icon {
-            width: 3rem;
-            height: 3rem;
-            border-radius: 0.75rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 1rem;
-            font-size: 1.25rem;
-            color: white;
-        }
-
-        .stat-icon.students { background: var(--primary-color); }
-        .stat-icon.responses { background: var(--success-color); }
-        .stat-icon.departments { background: var(--warning-color); }
-
-        .stat-value {
-            font-size: 2rem;
             font-weight: 700;
-            color: var(--gray-900);
-            margin-bottom: 0.5rem;
+            color: var(--primary-blue);
+            flex-shrink: 0;
+            margin-top: 0.15rem;
+        }
+        
+        /* Analytics Chart Container */
+        .chart-container {
+            padding: 1.5rem;
+            height: 400px; /* Set a fixed height */
+            width: 100%;
         }
 
-        .stat-label {
-            color: var(--gray-600);
-            font-size: 0.875rem;
-            font-weight: 500;
+        /* 12. Responsive */
+        @media (max-width: 992px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .filter-form { grid-template-columns: 1fr 1fr; }
         }
-
-        /* FOOTER */
-        .footer {
-            background: var(--white);
-            color: var(--gray-600);
-            font-size: 0.875rem;
-            text-align: center;
-            padding: 2rem 1.5rem;
-            border-top: 1px solid var(--gray-200);
-            margin-top: auto;
-        }
-
-        .footer-content {
-            max-width: 1280px;
-            margin: 0 auto;
-        }
-
-        .footer-text {
-            margin-bottom: 0.5rem;
-        }
-
-        .footer-subtext {
-            font-size: 0.75rem;
-            opacity: 0.8;
-        }
-
-        /* RESPONSIVE */
         @media (max-width: 768px) {
-            .header-container {
-                padding: 0 1rem;
-            }
-
-            .nav-menu {
-                display: none;
-                position: absolute;
-                top: 100%;
-                left: 0;
-                right: 0;
-                background: var(--white);
-                border-top: 1px solid var(--gray-200);
-                flex-direction: column;
-                padding: 1rem;
-                gap: 0.25rem;
-                box-shadow: var(--shadow-md);
-            }
-
-            .nav-menu.mobile-open {
-                display: flex;
-            }
-
-            .mobile-menu-button {
-                display: block;
-            }
-
-            .main-content {
-                padding: 1rem 0.75rem;
-            }
-
-            .page-title {
-                font-size: 1.5rem;
-            }
-
-            .filter-card {
-                padding: 1.5rem;
-            }
-
-            .filter-form {
-                grid-template-columns: 1fr;
-            }
-
-            .data-card-header {
-                padding: 1rem 1.5rem;
-                flex-direction: column;
-                gap: 1rem;
-                align-items: stretch;
-            }
-
-            .data-table th,
-            .data-table td {
-                padding: 0.75rem 0.5rem;
-            }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
+            .main-content { margin-left: 0; }
+            .sidebar { display: none; }
+            .content-area { padding: 1.5rem 1rem; }
+            .header { padding: 0 1rem; }
+            .header-title { display: none; }
+            .header .search-wrapper { display: none; }
+            .filter-form { grid-template-columns: 1fr; }
         }
+
     </style>
 </head>
+<body class="dark-theme"> <div id="loadingOverlay" class="loader-overlay">
+        <div class="loader-spinner"></div>
+    </div>
 
-<body>
-    <?php include __DIR__ . '/includes/sidebar.php'; ?>
-    <div style="margin-left: 280px;">
-    <!-- HEADER -->
-    <header class="header">
-        <div class="header-container">
-            <a href="dashboard.php" class="logo">
-                <div class="logo-icon">
-                    <i class="fas fa-graduation-cap"></i>
-                </div>
-                College Feedback Portal
-            </a>
-            
-            <nav class="nav-menu" id="navMenu">
-                <a href="dashboard.php" class="nav-link">
-                    <i class="fas fa-tachometer-alt"></i>
-                    Dashboard
-                </a>
-                <a href="../includes/logout.php" class="nav-link">
-                    <i class="fas fa-sign-out-alt"></i>
-                    Logout
-                </a>
-            </nav>
-    
-        </div>
-    </header>
-
-    <!-- MAIN CONTENT -->
-    <div class="main-content">
-        <!-- Page Header -->
-        <div class="page-header">
-            <h1 class="page-title">Feedback & Analytics</h1>
-            <p class="page-subtitle">Review feedback, analyze data, and view form reports across departments and semesters.</p>
-        </div>
-
-        <!-- Stats Cards -->
-        <?php
-        try {
-            // 1. Total students in selected class (department/year/semester)
-            $students_sql = "SELECT COUNT(DISTINCT s.id) as total_students FROM students s WHERE 1=1";
-            $student_params = [];
-            if (!empty($selected_department)) {
-                $students_sql .= " AND s.department = ?";
-                $student_params[] = $selected_department;
-            }
-            if (!empty($selected_year)) {
-                $students_sql .= " AND s.year = ?";
-                $student_params[] = $selected_year;
-            }
-            if (!empty($selected_semester)) {
-                $students_sql .= " AND s.semester = ?";
-                $student_params[] = $selected_semester;
-            }
-            
-            if (!empty($student_params)) {
-                $stmt = $conn->prepare($students_sql);
-                $stmt->bind_param(str_repeat('s', count($student_params)), ...$student_params);
-                $stmt->execute();
-                $total_students = $stmt->get_result()->fetch_assoc()['total_students'];
-            } else {
-                $result = $conn->query($students_sql);
-                $total_students = $result->fetch_assoc()['total_students'];
-            }
-            
-            // 2. Total forms created for selected criteria (distinct form numbers)
-            $forms_sql = "SELECT COUNT(DISTINCT f.form_number) as total_forms FROM feedback_forms f WHERE 1=1";
-            $form_params = [];
-            if (!empty($selected_department)) {
-                $forms_sql .= " AND f.department = ?";
-                $form_params[] = $selected_department;
-            }
-            if (!empty($selected_year)) {
-                $forms_sql .= " AND f.year = ?";
-                $form_params[] = $selected_year;
-            }
-            if (!empty($selected_semester)) {
-                $forms_sql .= " AND f.semester = ?";
-                $form_params[] = $selected_semester;
-            }
-            
-            if (!empty($form_params)) {
-                $stmt = $conn->prepare($forms_sql);
-                $stmt->bind_param(str_repeat('s', count($form_params)), ...$form_params);
-                $stmt->execute();
-                $total_forms = $stmt->get_result()->fetch_assoc()['total_forms'];
-            } else {
-                $result = $conn->query($forms_sql);
-                $total_forms = $result->fetch_assoc()['total_forms'];
-            }
-            
-            // 3. Total responses for selected criteria (join by form_number)
-            $responses_sql = "SELECT COUNT(fr.id) as total_responses 
-                              FROM feedback_responses fr 
-                              JOIN feedback_forms f ON fr.form_number = f.form_number 
-                              WHERE 1=1";
-            $response_params = [];
-            if (!empty($selected_department)) {
-                $responses_sql .= " AND f.department = ?";
-                $response_params[] = $selected_department;
-            }
-            if (!empty($selected_year)) {
-                $responses_sql .= " AND f.year = ?";
-                $response_params[] = $selected_year;
-            }
-            if (!empty($selected_semester)) {
-                $responses_sql .= " AND f.semester = ?";
-                $response_params[] = $selected_semester;
-            }
-            
-            if (!empty($response_params)) {
-                $stmt = $conn->prepare($responses_sql);
-                $stmt->bind_param(str_repeat('s', count($response_params)), ...$response_params);
-                $stmt->execute();
-                $total_responses = $stmt->get_result()->fetch_assoc()['total_responses'];
-            } else {
-                $result = $conn->query($responses_sql);
-                $total_responses = $result->fetch_assoc()['total_responses'];
-            }
-            
-            $stats = [
-                'total_students' => $total_students,
-                'total_forms' => $total_forms,
-                'total_responses' => $total_responses
-            ];
-            
-        } catch (Exception $e) {
-            $stats = ['total_students' => 0, 'total_forms' => 0, 'total_responses' => 0];
-        }
+    <div class="admin-layout">
         
-        // Get analytics data after stats are calculated
-        if ($view_type === 'analytics') {
-            // Check if we have any responses for the selected criteria
-            if ($stats['total_responses'] > 0) {
-                // Get actual analytics data from database
-                $analytics_query = "SELECT 
-                    AVG(fr.rating) as avg_rating,
-                    COUNT(fr.id) as response_count,
-                    SUM(CASE WHEN fr.rating = 5 THEN 1 ELSE 0 END) as excellent_5,
-                    SUM(CASE WHEN fr.rating = 4 THEN 1 ELSE 0 END) as good_4,
-                    SUM(CASE WHEN fr.rating = 3 THEN 1 ELSE 0 END) as average_3,
-                    SUM(CASE WHEN fr.rating = 2 THEN 1 ELSE 0 END) as fair_2,
-                    SUM(CASE WHEN fr.rating = 1 THEN 1 ELSE 0 END) as need_improvement_1
-                    FROM feedback_responses fr
-                    JOIN feedback_forms f ON fr.form_number = f.form_number
-                    WHERE 1=1";
-                
-                $analytics_params = [];
-                if (!empty($selected_department)) {
-                    $analytics_query .= " AND f.department = ?";
-                    $analytics_params[] = $selected_department;
-                }
-                if (!empty($selected_year)) {
-                    $analytics_query .= " AND f.year = ?";
-                    $analytics_params[] = $selected_year;
-                }
-                if (!empty($selected_semester)) {
-                    $analytics_query .= " AND f.semester = ?";
-                    $analytics_params[] = $selected_semester;
-                }
-                
-                try {
-                    if (!empty($analytics_params)) {
-                        $stmt = $conn->prepare($analytics_query);
-                        $stmt->bind_param(str_repeat('s', count($analytics_params)), ...$analytics_params);
-                        $stmt->execute();
-                        $result = $stmt->get_result();
-                        if ($row = $result->fetch_assoc()) {
-                            $analytics_data[] = [
-                                'question' => 'Overall Feedback Analysis',
-                                'avg_rating' => $row['avg_rating'],
-                                'response_count' => $row['response_count'],
-                                'excellent_5' => $row['excellent_5'],
-                                'good_4' => $row['good_4'],
-                                'average_3' => $row['average_3'],
-                                'fair_2' => $row['fair_2'],
-                                'need_improvement_1' => $row['need_improvement_1']
-                            ];
-                        }
-                    } else {
-                        $result = $conn->query($analytics_query);
-                        if ($result && $row = $result->fetch_assoc()) {
-                            $analytics_data[] = [
-                                'question' => 'Overall Feedback Analysis',
-                                'avg_rating' => $row['avg_rating'],
-                                'response_count' => $row['response_count'],
-                                'excellent_5' => $row['excellent_5'],
-                                'good_4' => $row['good_4'],
-                                'average_3' => $row['average_3'],
-                                'fair_2' => $row['fair_2'],
-                                'need_improvement_1' => $row['need_improvement_1']
-                            ];
-                        }
-                    }
-                } catch (Exception $e) {
-                    // If real data fails, use sample data as fallback
-                    $analytics_data = [
-                        ['question' => 'Sample Analysis', 'avg_rating' => 4.0, 'excellent_5' => 1, 'good_4' => 1, 'average_3' => 0, 'fair_2' => 0, 'need_improvement_1' => 0]
-                    ];
-                }
-            } else {
-                // No responses, but show sample data for demonstration
-                $analytics_data = [
-                    ['question' => 'Sample Analysis', 'avg_rating' => 4.0, 'excellent_5' => 1, 'good_4' => 1, 'average_3' => 0, 'fair_2' => 0, 'need_improvement_1' => 0]
-                ];
-            }
-        }
-        ?>
-        
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon students">
-                    <i class="fas fa-user-graduate"></i>
-                </div>
-                <div class="stat-value"><?= number_format($stats['total_students'] ?? 0) ?></div>
-                <div class="stat-label">Students</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon responses">
-                    <i class="fas fa-file-alt"></i>
-                </div>
-                <div class="stat-value"><?= number_format($stats['total_forms'] ?? 0) ?></div>
-                <div class="stat-label">Total Forms</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon departments">
-                    <i class="fas fa-comments"></i>
-                </div>
-                <div class="stat-value"><?= number_format($stats['total_responses'] ?? 0) ?></div>
-                <div class="stat-label">Total Responses</div>
-            </div>
-        </div>
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
-        <!-- Filter Card -->
-        <div class="filter-card">
-            <div class="filter-title">
-                <i class="fas fa-filter"></i>
-                Filters & View Options
-            </div>
+        <main class="main-content">
             
-            <!-- Filter Form -->
-            <form method="GET" class="filter-form">
-                <input type="hidden" name="view" value="<?php echo htmlspecialchars($view_type); ?>">
+            <header class="header">
+                <h1 class="header-title">Feedback & Analytics</h1>
                 
-                <div class="form-group">
-                    <label class="form-label">Department</label>
-                    <select name="department" class="form-select">
-                        <option value="">All Departments</option>
-                        <?php foreach ($departments as $dept): ?>
-                            <option value="<?php echo htmlspecialchars($dept); ?>" 
-                                    <?php echo ($selected_department == $dept) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($dept); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Year</label>
-                    <select name="year" class="form-select">
-                        <option value="">All Years</option>
-                        <option value="1" <?php echo ($selected_year == '1') ? 'selected' : ''; ?>>Year 1</option>
-                        <option value="2" <?php echo ($selected_year == '2') ? 'selected' : ''; ?>>Year 2</option>
-                        <option value="3" <?php echo ($selected_year == '3') ? 'selected' : ''; ?>>Year 3</option>
-                        <option value="4" <?php echo ($selected_year == '4') ? 'selected' : ''; ?>>Year 4</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Semester</label>
-                    <select name="semester" class="form-select">
-                        <option value="">All Semesters</option>
-                        <option value="1" <?php echo ($selected_semester == '1') ? 'selected' : ''; ?>>Semester 1</option>
-                        <option value="2" <?php echo ($selected_semester == '2') ? 'selected' : ''; ?>>Semester 2</option>
-                        <option value="3" <?php echo ($selected_semester == '3') ? 'selected' : ''; ?>>Semester 3</option>
-                        <option value="4" <?php echo ($selected_semester == '4') ? 'selected' : ''; ?>>Semester 4</option>
-                        <option value="5" <?php echo ($selected_semester == '5') ? 'selected' : ''; ?>>Semester 5</option>
-                        <option value="6" <?php echo ($selected_semester == '6') ? 'selected' : ''; ?>>Semester 6</option>
-                        <option value="7" <?php echo ($selected_semester == '7') ? 'selected' : ''; ?>>Semester 7</option>
-                        <option value="8" <?php echo ($selected_semester == '8') ? 'selected' : ''; ?>>Semester 8</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-search"></i>
-                        Apply Filters
+                <div class="header-actions">
+                    <button class="header-btn" title="Toggle Theme" id="themeToggleBtn">
+                        <i class="fas fa-sun"></i>
                     </button>
+                    <button class="header-btn" title="Notifications">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    <div class="user-avatar" title="Admin">AD</div>
+                </div>
+            </header>
+            
+            <div class="content-area">
+
+                <div class="dashboard-grid">
+                    <div class="grid-card">
+                        <div class="grid-card-body-padded">
+                            <div class="stat-card-new">
+                                <div class="stat-icon-new" style="background-color: var(--info-bg); color: var(--info-text);">
+                                    <i class="fas fa-user-graduate"></i>
+                                </div>
+                                <div class="stat-info-new">
+                                    <div class="stat-value"><?= number_format($stats['total_students'] ?? 0) ?></div>
+                                    <div class="stat-label">Students in Filter</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid-card">
+                        <div class="grid-card-body-padded">
+                            <div class="stat-card-new">
+                                <div class="stat-icon-new" style="background-color: var(--warning-bg); color: var(--warning-text);">
+                                    <i class="fas fa-file-alt"></i>
+                                </div>
+                                <div class="stat-info-new">
+                                    <div class="stat-value"><?= number_format($stats['total_forms'] ?? 0) ?></div>
+                                    <div class="stat-label">Forms in Filter</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid-card">
+                         <div class="grid-card-body-padded">
+                            <div class="stat-card-new">
+                                <div class="stat-icon-new" style="background-color: var(--success-bg); color: var(--success-text);">
+                                    <i class="fas fa-comments"></i>
+                                </div>
+                                <div class="stat-info-new">
+                                    <div class="stat-value"><?= number_format($stats['total_responses'] ?? 0) ?></div>
+                                    <div class="stat-label">Total Responses</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid-card">
+                    <div class="grid-card-body-padded">
+                        <form method="GET" class="filter-form">
+                            <input type="hidden" name="view" value="<?php echo htmlspecialchars($view_type); ?>">
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="filter-dept">Department</label>
+                                <select name="department" id="filter-dept" class="form-select">
+                                    <option value="">All Departments</option>
+                                    <?php foreach ($departments as $dept): ?>
+                                        <option value="<?php echo htmlspecialchars($dept); ?>" 
+                                                <?php echo ($selected_department == $dept) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($dept); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="filter-year">Year</label>
+                                <select name="year" id="filter-year" class="form-select">
+                                    <option value="">All Years</option>
+                                    <option value="1" <?php echo ($selected_year == '1') ? 'selected' : ''; ?>>Year 1</option>
+                                    <option value="2" <?php echo ($selected_year == '2') ? 'selected' : ''; ?>>Year 2</option>
+                                    <option value="3" <?php echo ($selected_year == '3') ? 'selected' : ''; ?>>Year 3</option>
+                                    <option value="4" <?php echo ($selected_year == '4') ? 'selected' : ''; ?>>Year 4</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="filter-sem">Semester</label>
+                                <select name="semester" id="filter-sem" class="form-select">
+                                    <option value="">All Semesters</option>
+                                    <?php for($i=1; $i<=8; $i++): ?>
+                                        <option value="<?=$i?>" <?php echo ($selected_semester == $i) ? 'selected' : ''; ?>>Semester <?=$i?></option>
+                                    <?php endfor; ?>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">&nbsp;</label> <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-search"></i>
+                                    Apply Filters
+                                </button>
+                            </div>
+                        </form>
+
+                        <div class="tabs">
+                            <a href="?view=feedback&department=<?php echo urlencode($selected_department); ?>&year=<?php echo urlencode($selected_year); ?>&semester=<?php echo urlencode($selected_semester); ?>" 
+                               class="tab-btn <?php echo ($view_type === 'feedback') ? 'active' : ''; ?>">
+                                <i class="fas fa-comments"></i> Feedback Responses
+                            </a>
+                            <a href="?view=forms&department=<?php echo urlencode($selected_department); ?>&year=<?php echo urlencode($selected_year); ?>&semester=<?php echo urlencode($selected_semester); ?>" 
+                               class="tab-btn <?php echo ($view_type === 'forms') ? 'active' : ''; ?>">
+                                <i class="fas fa-file-alt"></i> Form Reports
+                            </a>
+                            <a href="?view=analytics&department=<?php echo urlencode($selected_department); ?>&year=<?php echo urlencode($selected_year); ?>&semester=<?php echo urlencode($selected_semester); ?>" 
+                               class="tab-btn <?php echo ($view_type === 'analytics') ? 'active' : ''; ?>">
+                                <i class="fas fa-chart-bar"></i> Analytics
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+
+                <?php if ($view_type === 'analytics'): ?>
+                    <div class="grid-card">
+                        <?php if (!empty($analytics_data)): ?>
+                             <div class="grid-card-body-padded">
+                                 <div class="chart-container">
+                                     <canvas id="ratingChart"></canvas>
+                                 </div>
+                             </div>
+                             <div class="grid-card-body-padded" style="border-top: 1px solid var(--border-color)">
+                                 <div class="chart-container">
+                                    <canvas id="distributionChart"></canvas>
+                                 </div>
+                             </div>
+                        <?php else: ?>
+                            <div class="no-data-placeholder">
+                                <i class="fas fa-chart-bar"></i>
+                                <h3>No Analytics Data Found</h3>
+                                <p>No feedback responses were found for the selected filters.</p>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    
+                <?php elseif ($view_type === 'forms'): ?>
+                    <div class="grid-card">
+                        <div class="grid-card-header">
+                            <h3 class="card-title">Form Reports</h3>
+                        </div>
+                        <div class="grid-card-body">
+                            <?php if (!empty($forms_data)): ?>
+                                <div class="table-wrapper">
+                                    <table class="user-table" id="formsTable">
+                                        <thead>
+                                            <tr>
+                                                <th>Form Number</th>
+                                                <th>Details</th>
+                                                <th>Responses</th>
+                                                <th>Created</th>
+                                                <th style="text-align: right;">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($forms_data as $form): ?>
+                                            <tr>
+                                                <td>
+                                                    <span class="badge badge-blue">
+                                                        <?= htmlspecialchars($form['form_number']) ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <div style="font-weight: 500; color: var(--text-dark);"><?= htmlspecialchars($form['department']) ?></div>
+                                                    <div style="font-size: 0.8rem; color: var(--text-muted);">
+                                                        Year <?= $form['year'] ?> | Sem <?= $form['semester'] ?>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <span class="badge <?= $form['response_count'] == 0 ? 'badge-red' : 'badge-green' ?>">
+                                                        <?= $form['response_count'] ?> Responses
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <div style="font-size: 0.85rem; color: var(--text-body);"><?= date('M j, Y', strtotime($form['created_at'])) ?></div>
+                                                </td>
+                                                <td>
+                                                    <div class="action-buttons">
+                                                        <a href="detailed_report.php?form_number=<?php echo urlencode($form['form_number']); ?>" 
+                                                           class="btn btn-primary btn-sm" target="_blank">
+                                                            <i class="fas fa-file-pdf"></i> View Report
+                                                        </a>
+                                                        <button class="btn btn-secondary btn-sm view-form-btn" 
+                                                                data-form-number="<?= htmlspecialchars($form['form_number']) ?>">
+                                                            <i class="fas fa-eye"></i> View Qs
+                                                        </button>
+                                                        <button class="btn btn-danger btn-sm" 
+                                                                onclick="openDeleteConfirmationModal(<?= $form['form_id'] ?>, '<?= htmlspecialchars($form['form_number']) ?>', <?= $form['response_count'] ?>)">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php else: ?>
+                                <div class="no-data-placeholder">
+                                    <i class="fas fa-file-alt"></i>
+                                    <h3>No Forms Found</h3>
+                                    <p>No forms were found for the selected filters.</p>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    
+                <?php else: // Default 'feedback' view ?>
+                    <div class="grid-card">
+                        <div class="grid-card-header">
+                            <h3 class="card-title">Student Feedback Responses</h3>
+                            <?php
+                            $pdf_link = 'feedback_pdf.php';
+                            $query_string = http_build_query([
+                                'department' => $selected_department,
+                                'year' => $selected_year,
+                                'semester' => $selected_semester
+                            ]);
+                            if ($query_string) $pdf_link .= '?' . $query_string;
+                            ?>
+                            <a href="<?= $pdf_link ?>" class="btn btn-secondary btn-sm" target="_blank">
+                                <i class="fas fa-download"></i>
+                                Download PDF
+                            </a>
+                        </div>
+                        <div class="grid-card-body">
+                            <div class="table-wrapper">
+                                <table class="user-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Student Name</th>
+                                            <th>SIN Number</th>
+                                            <th>Department</th>
+                                            <th>Year</th>
+                                            <th>Semester</th>
+                                            <th style="text-align: right;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (!empty($feedback_data)): ?>
+                                            <?php foreach ($feedback_data as $stu): ?>
+                                                <tr>
+                                                    <td><?= htmlspecialchars($stu['name']) ?></td>
+                                                    <td><span class="badge"><?= htmlspecialchars($stu['sin_number']) ?></span></td>
+                                                    <td><?= htmlspecialchars($stu['department']) ?></td>
+                                                    <td><?= htmlspecialchars($stu['year']) ?></td>
+                                                    <td><?= htmlspecialchars($stu['semester']) ?></td>
+                                                    <td>
+                                                        <div class="action-buttons">
+                                                            <a href="view_student_response.php?student_id=<?= $stu['id'] ?>" class="btn btn-primary btn-sm" target="_blank">
+                                                                <i class="fas fa-eye"></i>
+                                                                View Response
+                                                            </a>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; // ITHAAN ANTHA SARIPANNA LINE (THIS IS THE CORRECTED LINE) ?> 
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="6">
+                                                    <div class="no-data-placeholder">
+                                                        <i class="fas fa-search"></i>
+                                                        <h3>No Feedback Data Found</h3>
+                                                        <p>No students have submitted feedback for the selected filters.</p>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                <?php endif; ?>
+                
+            </div> </main> </div> <div id="messageModal" class="modal-overlay">
+        <div class="modal-content" style="text-align: center; max-width: 450px;">
+            <button class="modal-close" onclick="closeModal('messageModal')">&times;</button>
+            <div id="messageIcon" style="font-size: 3rem; margin-bottom: 1rem;"></div>
+            <h2 id="messageText" style="margin-bottom: 1.5rem; font-size: 1.1rem; line-height: 1.6;"></h2>
+            <button class="btn btn-primary" onclick="closeModalAndRefresh('messageModal')">Close</button>
+        </div>
+    </div>
+    
+    <div id="deleteConfirmationModal" class="modal-overlay">
+        <div class="modal-content" style="text-align: center; max-width: 420px;">
+            <div style="font-size: 3rem; margin-bottom: 1rem; color: var(--danger-text);"><i class="fas fa-exclamation-triangle"></i></div>
+            <h2 style="margin-bottom: 0.5rem;">Are you sure?</h2>
+            <p id="deleteConfirmationText" style="margin-bottom: 1.5rem; font-size: 1rem;">This action cannot be undone.</p>
+            <form id="deleteForm" method="POST" onsubmit="showLoader()">
+                <input type="hidden" id="delete_form_id" name="delete_form_id">
+                <div style="display: flex; gap: 0.75rem; justify-content: center;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmationModal')">Cancel</button>
+                    <button type="submit" id="delete_submit_button" name="delete_form" class="btn btn-danger">Yes, Delete Form</button>
                 </div>
             </form>
-            
-            <!-- View Tabs -->
-            <div style="margin-top: 2rem; border-top: 1px solid var(--gray-200); padding-top: 2rem;">
-                <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
-                    <a href="?view=feedback&department=<?php echo urlencode($selected_department); ?>&year=<?php echo urlencode($selected_year); ?>&semester=<?php echo urlencode($selected_semester); ?>" 
-                       class="nav-link <?php echo ($view_type === 'feedback') ? 'active' : ''; ?>">
-                        <i class="fas fa-comments"></i> Feedback Responses
-                    </a>
-                    <a href="?view=forms&department=<?php echo urlencode($selected_department); ?>&year=<?php echo urlencode($selected_year); ?>&semester=<?php echo urlencode($selected_semester); ?>" 
-                       class="nav-link <?php echo ($view_type === 'forms') ? 'active' : ''; ?>">
-                        <i class="fas fa-file-alt"></i> Form Reports
-                    </a>
-                    <a href="?view=analytics&department=<?php echo urlencode($selected_department); ?>&year=<?php echo urlencode($selected_year); ?>&semester=<?php echo urlencode($selected_semester); ?>" 
-                       class="nav-link <?php echo ($view_type === 'analytics') ? 'active' : ''; ?>">
-                        <i class="fas fa-chart-bar"></i> Analytics
-                    </a>
-                </div>
+        </div>
+    </div>
+
+    <div id="viewFormModal" class="modal-overlay">
+        <div class="modal-content">
+             <button class="modal-close" onclick="closeModal('viewFormModal')">&times;</button>
+            <h2 id="viewFormTitle">Form Details</h2>
+            <div id="viewFormMeta" class="form-meta">Loading...</div>
+            <div class="question-list">
+                <ul id="viewFormQuestions">
+                    </ul>
             </div>
         </div>
+    </div>
 
-        <!-- Content based on view type -->
-        <?php if ($view_type === 'analytics'): ?>
-            <!-- Analytics View -->
-            <?php 
-            // Debug: Show what data we have
-            echo "<!-- Debug: Analytics data count: " . count($analytics_data) . " -->";
-            if (!empty($analytics_data)) {
-                echo "<!-- Debug: First row: " . json_encode($analytics_data[0]) . " -->";
+    
+    <script>
+        function showLoader() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+
+        function openModal(modalId) { 
+            const modal = document.getElementById(modalId);
+            if(modal) modal.classList.add('active');
+        }
+        function closeModal(modalId) { 
+            const modal = document.getElementById(modalId);
+            if(modal) modal.classList.remove('active');
+        }
+        
+        // PUTHU FUNCTION: Close panni refresh pannum
+        function closeModalAndRefresh(modalId) {
+            closeModal(modalId);
+            // Form delete-ku apparam, message-a clear panna URL-a maathrom
+            location.href = location.pathname + location.search;
+        }
+        
+        function showMessageModal(message, type) {
+            const modal = document.getElementById('messageModal');
+            const icon = modal.querySelector('#messageIcon');
+            const text = modal.querySelector('#messageText');
+            if (type === 'success') {
+                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-text);"></i>';
+            } else {
+                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-text);"></i>';
             }
-            ?>
-            <?php if (!empty($analytics_data)): ?>
-                <div class="chart-container">
-                    <div class="chart-title">Student Feedback Analysis</div>
-                    <canvas id="ratingChart" style="height: 400px;"></canvas>
-                </div>
-                
-                <div class="chart-container">
-                    <div class="chart-title">Rating Distribution</div>
-                    <canvas id="distributionChart" style="height: 400px;"></canvas>
-                </div>
-                
-                <script>
-                document.addEventListener('DOMContentLoaded', function() {
-                    const analyticsData = <?php echo json_encode($analytics_data); ?>;
+            text.innerHTML = message.replace(/\n/g, '<br>'); // Use innerHTML for <br>
+            openModal('messageModal');
+        }
+        
+        function openDeleteConfirmationModal(formId, formNumber, responseCount) {
+            document.getElementById('delete_form_id').value = formId;
+            const text = document.getElementById('deleteConfirmationText');
+            text.innerHTML = `Do you really want to delete form <strong>${formNumber}</strong>?<br>This will also delete all <strong>${responseCount}</strong> associated responses. This action cannot be undone.`;
+            openModal('deleteConfirmationModal');
+        }
+        
+        // --- View Form AJAX ---
+        document.querySelectorAll('.view-form-btn').forEach(button => {
+            button.addEventListener('click', function() {
+                const formNumber = this.dataset.formNumber;
+                loadFormDetails(formNumber);
+            });
+        });
+
+        function loadFormDetails(formNumber) {
+            openModal('viewFormModal');
+            // Set loading state
+            document.getElementById('viewFormTitle').textContent = 'Loading Details...';
+            document.getElementById('viewFormMeta').innerHTML = `<span class="badge">${formNumber}</span>`;
+            document.getElementById('viewFormQuestions').innerHTML = '<li><i class="fas fa-spinner fa-spin"></i> Loading questions...</li>';
+            
+            // Note: We're adding a cache-buster to ensure we get fresh data
+            const cacheBuster = new Date().getTime();
+            fetch(`?action=get_form_details&form_number=${encodeURIComponent(formNumber)}&_=${cacheBuster}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayFormDetails(data.form);
+                    } else {
+                        document.getElementById('viewFormQuestions').innerHTML = `<li>Error: ${data.error}</li>`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('viewFormQuestions').innerHTML = '<li>An error occurred while loading.</li>';
+                });
+        }
+
+        function displayFormDetails(form) {
+            document.getElementById('viewFormTitle').textContent = 'Form Questions';
+            document.getElementById('viewFormMeta').innerHTML = `
+                <span class="badge badge-blue">${form.form_number}</span>
+                <span class="badge">${form.department}</span>
+                <span class="badge">Year ${form.year}</span>
+                <span class="badge">Sem ${form.semester}</span>
+            `;
+            
+            let questionsHtml = '';
+            if (form.questions && form.questions.length > 0) {
+                questionsHtml = form.questions.map((q, index) => `
+                    <li><strong>Q${index + 1}:</strong> <span>${q}</span></li>
+                `).join('');
+            } else {
+                questionsHtml = '<li>No questions found for this form.</li>';
+            }
+            document.getElementById('viewFormQuestions').innerHTML = questionsHtml;
+        }
+
+        // --- Global JS ---
+        document.addEventListener('DOMContentLoaded', function() {
+            // Show session message if it exists
+            <?php if (!empty($message) || !empty($error_message)): ?>
+                showMessageModal(
+                    '<?php echo addslashes(empty($message) ? $error_message : $message); ?>',
+                    '<?php echo empty($message) ? 'error' : 'success'; ?>'
+                );
+            <?php endif; ?>
+
+            // Theme Toggle
+            const themeToggleBtn = document.getElementById('themeToggleBtn');
+            if(themeToggleBtn) {
+                // Check local storage for theme
+                const currentTheme = localStorage.getItem('theme');
+                if (currentTheme === 'dark') {
+                    document.body.classList.add('dark-theme');
+                    themeToggleBtn.querySelector('i').classList.replace('fa-sun', 'fa-moon');
+                } else {
+                     document.body.classList.remove('dark-theme');
+                     themeToggleBtn.querySelector('i').classList.replace('fa-moon', 'fa-sun');
+                }
+
+                themeToggleBtn.addEventListener('click', () => {
+                    document.body.classList.toggle('dark-theme');
+                    const icon = themeToggleBtn.querySelector('i');
+                    if (document.body.classList.contains('dark-theme')) {
+                        icon.classList.replace('fa-sun', 'fa-moon');
+                        localStorage.setItem('theme', 'dark');
+                    } else {
+                        icon.classList.replace('fa-moon', 'fa-sun');
+                        localStorage.setItem('theme', 'light');
+                    }
                     
-                    // Rating Line Chart
-                    const ratingCtx = document.getElementById('ratingChart').getContext('2d');
-                    const ratingLabels = analyticsData.map((q, i) => `Q${i + 1}`);
-                    const ratingValues = analyticsData.map(q => parseFloat(q.avg_rating));
-                    
-                    new Chart(ratingCtx, {
-                        type: 'line',
+                    // Reload charts with new colors
+                    if (typeof Chart.instances === 'object') {
+                        Object.values(Chart.instances).forEach(chart => {
+                            chart.destroy();
+                        });
+                    }
+                    if (typeof loadCharts === 'function') {
+                        loadCharts(); // We'll wrap chart logic in this function
+                    }
+                });
+            }
+            
+            loadCharts(); // Initial chart load
+        });
+        
+        function loadCharts() {
+            // --- CHART.JS LOGIC ---
+            <?php if ($view_type === 'analytics' && !empty($analytics_data)): ?>
+                const analyticsData = <?php echo json_encode($analytics_data); ?>;
+                const chartLabels = analyticsData.map((q, i) => `Q${i + 1} (${q.response_count} resp)`);
+                const isDark = document.body.classList.contains('dark-theme');
+                const textColor = isDark ? '#f9fafb' : '#111827';
+                const gridColor = isDark ? '#374151' : '#e5e7eb';
+                const tickColor = isDark ? '#9ca3af' : '#4b5563';
+                const chartBg = isDark ? '#1f2937' : '#ffffff';
+
+                // 1. Rating Bar Chart
+                const ratingCtx = document.getElementById('ratingChart');
+                if (ratingCtx) {
+                    new Chart(ratingCtx.getContext('2d'), {
+                        type: 'bar',
                         data: {
-                            labels: ratingLabels,
+                            labels: chartLabels,
                             datasets: [{
                                 label: 'Average Rating',
-                                data: ratingValues,
-                                borderColor: '#2563eb',
-                                backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                                borderWidth: 3,
-                                fill: true,
-                                tension: 0.4,
-                                pointBackgroundColor: '#2563eb',
-                                pointBorderColor: '#ffffff',
-                                pointBorderWidth: 2,
-                                pointRadius: 6,
-                                pointHoverRadius: 8
+                                data: analyticsData.map(q => parseFloat(q.avg_rating)),
+                                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                                borderColor: 'rgba(59, 130, 246, 1)',
+                                borderWidth: 2,
+                                borderRadius: 4
                             }]
                         },
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
                             plugins: {
-                                legend: { 
-                                    display: true,
-                                    position: 'top',
-                                    labels: {
-                                        usePointStyle: true,
-                                        padding: 20
-                                    }
-                                },
+                                legend: { display: false },
+                                title: { display: true, text: 'Average Rating per Question', font: { size: 16 }, color: textColor },
                                 tooltip: {
                                     callbacks: {
                                         title: function(context) {
                                             const index = context[0].dataIndex;
-                                            return `Question ${index + 1}`;
+                                            return analyticsData[index].question;
                                         },
                                         label: function(context) {
-                                            return `Average Rating: ${context.parsed.y.toFixed(1)}/5.0`;
+                                            return `Avg Rating: ${context.parsed.y.toFixed(2)}/5.0`;
                                         }
                                     }
                                 }
                             },
                             scales: {
                                 y: {
-                                    beginAtZero: true,
-                                    max: 5,
-                                    ticks: { 
-                                        stepSize: 0.5,
-                                        callback: function(value) {
-                                            return value.toFixed(1);
-                                        }
-                                    },
-                                    title: {
-                                        display: true,
-                                        text: 'Rating (out of 5)',
-                                        font: { size: 14, weight: 'bold' }
-                                    },
-                                    grid: {
-                                        color: 'rgba(0, 0, 0, 0.1)'
-                                    }
+                                    beginAtZero: true, max: 5, ticks: { stepSize: 1, color: tickColor },
+                                    grid: { color: gridColor }
                                 },
-                                x: {
-                                    title: {
-                                        display: true,
-                                        text: 'Questions',
-                                        font: { size: 14, weight: 'bold' }
-                                    },
-                                    grid: {
-                                        display: false
-                                    }
-                                }
+                                x: { ticks: { color: tickColor }, grid: { display: false } }
                             }
                         }
                     });
-                    
-                    // Distribution Stacked Area Chart
-                    const distCtx = document.getElementById('distributionChart').getContext('2d');
-                    
-                    new Chart(distCtx, {
-                        type: 'line',
+                }
+
+                // 2. Distribution Doughnut Chart (Overall)
+                const distCtx = document.getElementById('distributionChart');
+                if(distCtx) {
+                    const overall = analyticsData.reduce((acc, q) => {
+                        acc.excellent_5 += parseInt(q.excellent_5, 10);
+                        acc.good_4 += parseInt(q.good_4, 10);
+                        acc.average_3 += parseInt(q.average_3, 10);
+                        acc.fair_2 += parseInt(q.fair_2, 10);
+                        acc.need_improvement_1 += parseInt(q.need_improvement_1, 10);
+                        return acc;
+                    }, { excellent_5: 0, good_4: 0, average_3: 0, fair_2: 0, need_improvement_1: 0 });
+
+                    new Chart(distCtx.getContext('2d'), {
+                        type: 'doughnut',
                         data: {
-                            labels: ratingLabels,
-                            datasets: [
-                                {
-                                    label: 'Excellent (5)',
-                                    data: analyticsData.map(q => parseInt(q.excellent_5)),
-                                    borderColor: '#10b981',
-                                    backgroundColor: 'rgba(16, 185, 129, 0.3)',
-                                    fill: true,
-                                    tension: 0.4,
-                                    pointRadius: 4
-                                },
-                                {
-                                    label: 'Good (4)',
-                                    data: analyticsData.map(q => parseInt(q.good_4)),
-                                    borderColor: '#3b82f6',
-                                    backgroundColor: 'rgba(59, 130, 246, 0.3)',
-                                    fill: true,
-                                    tension: 0.4,
-                                    pointRadius: 4
-                                },
-                                {
-                                    label: 'Average (3)',
-                                    data: analyticsData.map(q => parseInt(q.average_3)),
-                                    borderColor: '#f59e0b',
-                                    backgroundColor: 'rgba(245, 158, 11, 0.3)',
-                                    fill: true,
-                                    tension: 0.4,
-                                    pointRadius: 4
-                                },
-                                {
-                                    label: 'Fair (2)',
-                                    data: analyticsData.map(q => parseInt(q.fair_2)),
-                                    borderColor: '#ef4444',
-                                    backgroundColor: 'rgba(239, 68, 68, 0.3)',
-                                    fill: true,
-                                    tension: 0.4,
-                                    pointRadius: 4
-                                },
-                                {
-                                    label: 'Need Improvement (1)',
-                                    data: analyticsData.map(q => parseInt(q.need_improvement_1)),
-                                    borderColor: '#6b7280',
-                                    backgroundColor: 'rgba(107, 114, 128, 0.3)',
-                                    fill: true,
-                                    tension: 0.4,
-                                    pointRadius: 4
-                                }
-                            ]
+                            labels: ['Excellent (5)', 'Good (4)', 'Average (3)', 'Fair (2)', 'Needs Improvement (1)'],
+                            datasets: [{
+                                label: 'Total Responses',
+                                data: [
+                                    overall.excellent_5,
+                                    overall.good_4,
+                                    overall.average_3,
+                                    overall.fair_2,
+                                    overall.need_improvement_1
+                                ],
+                                backgroundColor: [
+                                    'rgba(16, 185, 129, 0.7)', // green
+                                    'rgba(59, 130, 246, 0.7)', // blue
+                                    'rgba(245, 158, 11, 0.7)', // yellow
+                                    'rgba(239, 68, 68, 0.7)', // red
+                                    'rgba(107, 114, 128, 0.7)' // gray
+                                ],
+                                borderColor: chartBg,
+                                borderWidth: 3,
+                            }]
                         },
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
-                            interaction: {
-                                mode: 'index',
-                                intersect: false
-                            },
                             plugins: {
-                                legend: {
-                                    position: 'top',
-                                    labels: {
-                                        usePointStyle: true,
-                                        padding: 15
-                                    }
-                                },
-                                tooltip: {
-                                    mode: 'index',
-                                    intersect: false
-                                }
-                            },
-                            scales: {
-                                x: {
-                                    title: {
-                                        display: true,
-                                        text: 'Questions',
-                                        font: { size: 14, weight: 'bold' }
-                                    },
-                                    grid: {
-                                        display: false
-                                    }
-                                },
-                                y: {
-                                    beginAtZero: true,
-                                    title: {
-                                        display: true,
-                                        text: 'Number of Students',
-                                        font: { size: 14, weight: 'bold' }
-                                    },
-                                    grid: {
-                                        color: 'rgba(0, 0, 0, 0.1)'
-                                    }
-                                }
+                                legend: { position: 'right', labels: { color: textColor } },
+                                title: { display: true, text: 'Overall Rating Distribution', font: { size: 16 }, color: textColor }
                             }
                         }
                     });
-                });
-                </script>
-            <?php else: ?>
-                <div class="data-card">
-                    <div class="data-card-header">
-                        <h3 class="data-card-title">
-                            <i class="fas fa-chart-bar"></i>
-                            Analytics
-                        </h3>
-                    </div>
-                    <div style="text-align: center; padding: 3rem; color: var(--gray-500);">
-                        <i class="fas fa-chart-bar" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
-                        <h3>No Analytics Data Found</h3>
-                        <p>No feedback responses found for:</p>
-                        <ul style="list-style: none; margin-top: 1rem;">
-                            <li><strong>Department:</strong> <?php echo $selected_department ?: 'All'; ?></li>
-                            <li><strong>Year:</strong> <?php echo $selected_year ?: 'All'; ?></li>
-                            <li><strong>Semester:</strong> <?php echo $selected_semester ?: 'All'; ?></li>
-                        </ul>
-                        <p style="margin-top: 1rem; font-size: 0.9rem;">Try different filter combinations or check if feedback responses exist for this criteria.</p>
-                    </div>
-                </div>
-            <?php endif; ?>
-            
-        <?php elseif ($view_type === 'forms'): ?>
-            <!-- Forms View -->
-            <div class="data-card">
-                <div class="data-card-header">
-                    <h3 class="data-card-title">
-                        <i class="fas fa-file-alt"></i>
-                        Form Reports
-                    </h3>
-                </div>
-                
-                <?php if (!empty($forms_data)): ?>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Form No</th>
-                                    <th>Department</th>
-                                    <th>Year</th>
-                                    <th>Semester</th>
-                                    <th>Responses</th>
-                                    <th>Created Date</th>
-                                    <th>View Report</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($forms_data as $form): ?>
-                                    <tr>
-                                        <td><?php 
-                                            // Create form number like FF20258552 using date and ID
-                                            $date_part = date('Ymd', strtotime($form['created_at']));
-                                            $form_number = 'FF' . substr($date_part, 2) . str_pad($form['id'], 2, '0', STR_PAD_LEFT);
-                                            echo $form_number;
-                                        ?></td>
-                                        <td><?php echo htmlspecialchars($form['department']); ?></td>
-                                        <td><?php echo $form['year']; ?></td>
-                                        <td><?php echo $form['semester']; ?></td>
-                                        <td><span style="background: #10b981; color: white; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem;"><?php echo $form['response_count']; ?></span></td>
-                                        <td><?php echo date('d-m-Y', strtotime($form['created_at'])); ?></td>
-                                        <td>
-                                            <a href="detailed_report.php?form_id=<?php echo urlencode($form['id']); ?>&department=<?php echo urlencode($form['department']); ?>&year=<?php echo urlencode($form['year']); ?>&semester=<?php echo urlencode($form['semester']); ?>" 
-                                               class="btn btn-primary btn-sm" target="_blank" style="background: #2563eb; color: white; padding: 0.4rem 0.8rem; border: none; border-radius: 0.375rem; text-decoration: none; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.25rem;">
-                                                <i class="fas fa-file-alt"></i>
-                                                View Report
-                                            </a>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php else: ?>
-                    <div style="text-align: center; padding: 3rem; color: var(--gray-500);">
-                        <i class="fas fa-file-alt" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
-                        <h3>No Forms Found</h3>
-                        <p>No forms found for the selected criteria</p>
-                    </div>
-                <?php endif; ?>
-            </div>
-            
-        <?php else: ?>
-            <!-- Default Feedback View -->
-
-        <!-- Data Card -->
-        <div class="data-card">
-            <div class="data-card-header">
-                <h3 class="data-card-title">
-                    <i class="fas fa-table"></i>
-                    Student Feedback Responses
-                </h3>
-                <?php
-                $pdf_link = 'feedback_pdf.php';
-                if (isset($_GET['department'],$_GET['year'],$_GET['semester']) && $_GET['department'] && $_GET['year'] && $_GET['semester']) {
-                    $pdf_link .= '?department='.urlencode($_GET['department']).'&year='.urlencode($_GET['year']).'&semester='.urlencode($_GET['semester']);
                 }
-                ?>
-                <a href="<?= $pdf_link ?>" class="btn btn-success download-btn">
-                    <i class="fas fa-download"></i>
-                    Download PDF
-                </a>
-            </div>
+            <?php endif; ?>
+        } // End of loadCharts()
 
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Student Name</th>
-                            <th>SIN Number</th>
-                            <th>Department</th>
-                            <th>Year</th>
-                            <th>Semester</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php
-                        $stu_sql = "SELECT DISTINCT s.id, s.name, s.sin_number, s.department, s.year, s.semester 
-                                    FROM feedback_responses fr 
-                                    JOIN students s ON fr.student_id = s.id";
-                        $stu_where = [];
-                        $stu_params = [];
-                        if (!empty($selected_department)) {
-                            $stu_where[] = "s.department = ?";
-                            $stu_params[] = $selected_department;
-                        }
-                        if (!empty($selected_year)) {
-                            $stu_where[] = "s.year = ?";
-                            $stu_params[] = $selected_year;
-                        }
-                        if (!empty($selected_semester)) {
-                            $stu_where[] = "s.semester = ?";
-                            $stu_params[] = $selected_semester;
-                        }
-                        if ($stu_where) $stu_sql .= ' WHERE ' . implode(' AND ', $stu_where);
-                        $stu_sql .= ' ORDER BY s.name';
-                        
-                        if (!empty($stu_params)) {
-                            $stu_stmt = $conn->prepare($stu_sql);
-                            $stu_stmt->bind_param(str_repeat('s', count($stu_params)), ...$stu_params);
-                            $stu_stmt->execute();
-                            $stu_result = $stu_stmt->get_result();
-                        } else {
-                            $stu_result = $conn->query($stu_sql);
-                        }
-
-                        if ($stu_result && $stu_result->num_rows > 0):
-                            while ($stu = $stu_result->fetch_assoc()):
-                        ?>
-                            <tr>
-                                <td>
-                                    <div style="font-weight: 500;"><?= htmlspecialchars($stu['name']) ?></div>
-                                </td>
-                                <td>
-                                    <span style="font-family: 'Courier New', monospace; background: var(--gray-100); padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8rem;">
-                                        <?= htmlspecialchars($stu['sin_number']) ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <span class="badge" style="background: var(--primary-color); color: white; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 500;">
-                                        <?= htmlspecialchars($stu['department']) ?>
-                                    </span>
-                                </td>
-                                <td><?= htmlspecialchars($stu['year']) ?></td>
-                                <td><?= htmlspecialchars($stu['semester']) ?></td>
-                                <td>
-                                    <a href="view_student_response.php?student_id=<?= $stu['id'] ?>" class="btn btn-primary btn-sm">
-                                        <i class="fas fa-eye"></i>
-                                        View Response
-                                    </a>
-                                </td>
-                            </tr>
-                        <?php endwhile; else: ?>
-                            <tr>
-                                <td colspan="6" class="no-data">
-                                    <i class="fas fa-search"></i>
-                                    <div style="font-weight: 500; margin-bottom: 0.5rem;">No feedback data found</div>
-                                    <div>Try adjusting your filter criteria to find feedback responses.</div>
-                                </td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <?php endif; ?>
-    </div>
-
-    <!-- FOOTER -->
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-text">&copy; <?= date('Y') ?> College Feedback Portal. All rights reserved.</div>
-            <div class="footer-subtext">Enhancing education through continuous feedback and improvement</div>
-        </div>
-    </footer>
-
-    <script>
-        // Mobile menu toggle
-        function toggleMobileMenu() {
-            const navMenu = document.getElementById('navMenu');
-            navMenu.classList.toggle('mobile-open');
+        // Close modal on outside click
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal-overlay')) {
+                closeModal(event.target.id);
+            }
         }
-
-        // Auto-hide mobile menu when clicking outside
-        document.addEventListener('click', function(event) {
-            const navMenu = document.getElementById('navMenu');
-            const menuButton = document.querySelector('.mobile-menu-btn');
-            
-            if (!navMenu.contains(event.target) && !menuButton.contains(event.target)) {
-                navMenu.classList.remove('mobile-open');
+        
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => {
+                    closeModal(modal.id);
+                });
             }
         });
     </script>
-    </div>
 </body>
 </html>

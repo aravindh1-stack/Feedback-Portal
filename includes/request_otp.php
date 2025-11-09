@@ -2,12 +2,11 @@
 // /includes/request_otp.php
 // AJAX: validate USERNAME/ROLE and send OTP without redirecting
 
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 error_reporting(E_ALL);
 header('Content-Type: application/json');
 
 session_start();
-require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/otp_helpers.php';
 
 $role = $_POST['role'] ?? '';
@@ -31,6 +30,7 @@ if ($role === 'student') {
 }
 
 try {
+  require_once __DIR__ . '/../config/db.php';
   // Fetch the user record WITHOUT checking the password
   if ($role === 'student') {
     // Allow lookup by SIN number OR email for students
@@ -111,6 +111,10 @@ try {
   echo json_encode(['success' => true, 'message' => 'OTP sent successfully', 'email' => $masked]);
 
 } catch (Throwable $e) {
-  error_log("OTP Request Error: " . $e->getMessage());
+  http_response_code(500);
+  $logDir = __DIR__ . '/../logs';
+  if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+  $msg = '[' . date('Y-m-d H:i:s') . '] request_otp error: ' . $e->getMessage() . "\n";
+  @file_put_contents($logDir . '/app.log', $msg, FILE_APPEND);
   echo json_encode(['success' => false, 'message' => 'A server error occurred. Please try again.']);
 }

@@ -25,31 +25,33 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_form_details') {
     }
     $form_number = trim($_GET['form_number']);
     try {
-        $stmt = $conn->prepare("SELECT question, subject_code, faculty_id FROM feedback_forms WHERE form_number = ? ORDER BY id");
+        // Intha query la oru chinna optimization: DISTINCT use pannalam
+        $stmt = $conn->prepare("SELECT DISTINCT question FROM feedback_forms WHERE form_number = ? ORDER BY id");
         $stmt->bind_param("s", $form_number);
         $stmt->execute();
         $result = $stmt->get_result();
         $questions = [];
-        $facultyMap = [];
-        // Get faculty names for mapping
-        $facultyRes = $conn->query("SELECT id, name FROM faculty");
-        if ($facultyRes) {
-            while ($f = $facultyRes->fetch_assoc()) {
-                $facultyMap[$f['id']] = $f['name'];
-            }
-        }
         while ($row = $result->fetch_assoc()) {
-            $questions[] = [
-                'question_text' => $row['question'],
-                'subject_code' => $row['subject_code'],
-                'faculty_name' => isset($facultyMap[$row['faculty_id']]) ? $facultyMap[$row['faculty_id']] : $row['faculty_id']
-            ];
+            $questions[] = $row['question'];
         }
+        
+        // Form details-a yum eduthukalam
+        $stmt_details = $conn->prepare("SELECT department, year, semester FROM feedback_forms WHERE form_number = ? LIMIT 1");
+        $stmt_details->bind_param("s", $form_number);
+        $stmt_details->execute();
+        $details_result = $stmt_details->get_result();
+        $details = $details_result->fetch_assoc();
+
         $stmt->close();
+        $stmt_details->close();
+        
         echo json_encode([
             'success' => true,
             'form' => [
                 'form_number' => $form_number,
+                'department' => $details['department'] ?? 'N/A',
+                'year' => $details['year'] ?? 'N/A',
+                'semester' => $details['semester'] ?? 'N/A',
                 'questions' => $questions,
                 'total_questions' => count($questions)
             ]
@@ -65,59 +67,96 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_form_details') {
 
 // Handle delete request
 if (isset($_POST['delete_form_id'])) {
-    $form_id = intval($_POST['delete_form_id']);
+    $form_id_to_delete = intval($_POST['delete_form_id']); // This ID is the MIN(id) from the form
     
-    try {
-        // Start transaction
-        $conn->autocommit(FALSE);
+    // We need the form_number to delete all related entries, not just one ID
+    $stmt_get_num = $conn->prepare("SELECT form_number FROM feedback_forms WHERE id = ?");
+    $stmt_get_num->bind_param("i", $form_id_to_delete);
+    $stmt_get_num->execute();
+    $result_num = $stmt_get_num->get_result();
+    $form_data = $result_num->fetch_assoc();
+    
+    if ($form_data) {
+        $form_number_to_delete = $form_data['form_number'];
         
-        // Delete related responses first (foreign key constraint)
-        $delete_responses = $conn->prepare("DELETE FROM feedback_responses WHERE form_id = ?");
-        if ($delete_responses) {
-            $delete_responses->bind_param("i", $form_id);
-            $delete_responses->execute();
-            $delete_responses->close();
-        }
-        
-        // Delete the form
-        $delete_form = $conn->prepare("DELETE FROM feedback_forms WHERE id = ?");
-        if (!$delete_form) {
-            throw new Exception("Prepare failed: " . $conn->error);
-        }
-        
-        $delete_form->bind_param("i", $form_id);
-        $delete_form->execute();
-        
-        if ($delete_form->affected_rows > 0) {
-            $conn->commit();
-            $message = 'Form deleted successfully!';
-        } else {
+        try {
+            $conn->begin_transaction();
+
+            // 1. Get all form IDs with this form_number
+            $form_ids = [];
+            $stmt_ids = $conn->prepare("SELECT id FROM feedback_forms WHERE form_number = ?");
+            $stmt_ids->bind_param("s", $form_number_to_delete);
+            $stmt_ids->execute();
+            $result_ids = $stmt_ids->get_result();
+            while($row = $result_ids->fetch_assoc()) {
+                $form_ids[] = $row['id'];
+            }
+            $stmt_ids->close();
+
+            if (!empty($form_ids)) {
+                $placeholders = implode(',', array_fill(0, count($form_ids), '?'));
+                $types = str_repeat('i', count($form_ids));
+
+                // 2. Delete related responses first
+                $delete_responses = $conn->prepare("DELETE FROM feedback_responses WHERE form_id IN ($placeholders)");
+                $delete_responses->bind_param($types, ...$form_ids);
+                $delete_responses->execute();
+                $delete_responses->close();
+                
+                // 3. Delete from form_questions table
+                $delete_fq = $conn->prepare("DELETE FROM form_questions WHERE form_number = ?");
+                $delete_fq->bind_param("s", $form_number_to_delete);
+                $delete_fq->execute();
+                $delete_fq->close();
+
+                // 4. Delete all form entries from feedback_forms
+                $delete_form = $conn->prepare("DELETE FROM feedback_forms WHERE form_number = ?");
+                $delete_form->bind_param("s", $form_number_to_delete);
+                $delete_form->execute();
+                
+                if ($delete_form->affected_rows > 0) {
+                    $conn->commit();
+                    $_SESSION['message'] = "Form ($form_number_to_delete) and all its related data deleted successfully!";
+                    $_SESSION['message_type'] = 'success';
+                } else {
+                    $conn->rollback();
+                    $_SESSION['message'] = 'Form not found or could not be deleted.';
+                    $_SESSION['message_type'] = 'error';
+                }
+                $delete_form->close();
+            } else {
+                 $conn->rollback();
+                 $_SESSION['message'] = 'Form not found.';
+                 $_SESSION['message_type'] = 'error';
+            }
+        } catch (Exception $e) {
             $conn->rollback();
-            $error_message = 'Form not found or could not be deleted.';
+            $_SESSION['message'] = 'Error deleting form: '. $e->getMessage();
+            $_SESSION['message_type'] = 'error';
+            error_log("Delete form error: " . $e->getMessage());
         }
-        
-        $delete_form->close();
-        $conn->autocommit(TRUE);
-        
-    } catch (Exception $e) {
-        $conn->rollback();
-        $conn->autocommit(TRUE);
-        $error_message = 'Error deleting form: ' . $e->getMessage();
-        error_log("Delete form error: " . $e->getMessage());
+    } else {
+        $_SESSION['message'] = 'Could not find form to delete.';
+        $_SESSION['message_type'] = 'error';
     }
+    
+    $stmt_get_num->close();
+    header("Location: manage_forms.php");
+    exit();
 }
 
 // Fetch feedback forms with error handling
 try {
-    $sql = "SELECT f.*, faculty.name as faculty_name,
-                   (SELECT COUNT(*) FROM feedback_responses WHERE form_id = f.id) as response_count
-            FROM feedback_forms f 
-            INNER JOIN faculty ON f.faculty_id = faculty.id 
-            WHERE f.id = (
-                SELECT MIN(id) FROM feedback_forms 
-                WHERE form_number = f.form_number
+    // Intha query correct aa irukku. Group by form_number panni MIN(id) edukkuthu.
+    $sql = "SELECT f.*, 
+                   (SELECT COUNT(DISTINCT student_id) FROM feedback_responses fr WHERE fr.form_id IN (SELECT id FROM feedback_forms WHERE form_number = f.form_number)) as response_count
+            FROM feedback_forms f
+            WHERE f.id IN (
+                SELECT MIN(id) 
+                FROM feedback_forms 
+                GROUP BY form_number
             )
-            ORDER BY f.created_at DESC, f.department, f.year, f.semester, f.subject_code";
+            ORDER BY f.created_at DESC";
     
     $result = $conn->query($sql);
     
@@ -135,938 +174,678 @@ try {
     error_log("Fetch forms error: " . $e->getMessage());
     $forms = [];
 }
+
+// Session message check
+if (isset($_SESSION['message'])) {
+    $message = $_SESSION['message'];
+    $message_type = $_SESSION['message_type'];
+    unset($_SESSION['message']);
+    unset($_SESSION['message_type']);
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <title>Manage Feedback Forms - Admin Portal</title>
+    <title>Manage Forms - Aarasys</title>
+
+    <link rel="icon" type="image/x-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzQzMzhDMyIvPgo8cGF0aCBkPSJNOCAxMkg5VjIwSDhWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTEgMTJIMTJWMjBIMTFWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTQgMTJIMTVWMjBIMTRWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
     <style>
+        /* === NEW DESIGN STYLES (FROM manage_users.php) === */
+
+        /* 1. CSS Variables (Theme) */
         :root {
-            --primary-50: #eff6ff;
-            --primary-500: #3b82f6;
-            --primary-600: #2563eb;
-            --danger-100: #fee2e2;
-            --danger-500: #dc2626;
-            --danger-600: #b91c1c;
-            --gray-50: #f9fafb;
-            --gray-100: #f3f4f6;
-            --gray-200: #e5e7eb;
-            --gray-400: #9ca3af;
-            --gray-500: #6b7280;
-            --gray-600: #4b5563;
-            --gray-800: #1f2937;
-            --heading-color: #111827;
-            --text-color: #4b5563;
-            --sidebar-bg: #ffffff;
+            /* Palette */
+            --primary-blue: #3b82f6; 
+            --primary-purple: #6366F1;
+            --dark-bg: #1f2937;
+            --light-bg: #f8f9fa;    /* <-- "Dim White" Page Background */
+            --card-bg: #ffffff;     /* <-- White Card Background */
             --border-color: #e5e7eb;
-            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.06);
-            --radius-lg: 12px;
+            --text-dark: #111827;
+            --text-body: #4b5563;
+            --text-light: #f9fafb;
+            --text-muted: #9ca3af;
+            --text-blue: #2563eb;
+            --success-bg: #dcfce7;
+            --success-text: #16a34a;
+            --danger-bg: #fee2e2;
+            --danger-text: #dc2626;
+            --info-bg: #eff6ff;
+            --info-text: #2563eb;
+            --warning-bg: #fef3c7;
+            --warning-text: #d97706;
+            
+            /* Sizing & Spacing */
             --sidebar-width: 280px;
+            --header-height: 88px;
+            --radius-sm: 0.375rem; --radius-md: 0.5rem; --radius-lg: 0.75rem;
+            --radius-xl: 1rem; --radius-2xl: 1.5rem; --radius-full: 9999px;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
         }
-        *{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+
+        /* 2. Base & Reset */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #f8fafc;
-            color: #334155;
-            line-height: 1.6;
-            /* Add these for sticky footer */
-            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            background-color: var(--light-bg);
+            color: var(--text-body);
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        a { text-decoration: none; color: inherit; }
+        button { font-family: inherit; }
+
+        /* 3. Main Layout */
+        .admin-layout { display: flex; }
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
             display: flex;
             flex-direction: column;
+            min-height: 100vh;
+            transition: margin-left 0.3s ease; /* Sidebar collapse animation */
         }
-        /* Header */
+        body.sidebar-collapsed .main-content {
+            margin-left: 92px; /* Collapsed sidebar width */
+        }
+        .content-area {
+            padding: 2rem 2.5rem;
+            flex: 1;
+        }
+
+        /* 4. Header (Topbar) */
         .header {
-            background: white;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            height: var(--header-height);
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2.5rem;
             position: sticky;
             top: 0;
-            z-index: 1000;
+            z-index: 20;
         }
-
-        .header-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            text-decoration: none;
-            color: #1e293b;
-            font-weight: 600;
-            font-size: 1.125rem;
-        }
-
-        .logo-icon {
-            width: 32px;
-            height: 32px;
-            background: #3b82f6;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 16px;
-        }
-
-        .mobile-menu-button {
-            display: none;
-            background: none;
-            border: none;
-            font-size: 1.25rem;
-            color: #64748b;
-            cursor: pointer;
-            padding: 0.5rem;
-        }
-
-        .nav-menu {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-        }
-
-        .nav-link {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            text-decoration: none;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: all 0.2s;
-            color: #64748b;
-        }
-
-        .nav-link:hover {
-            background: #f1f5f9;
-            color: #475569;
-        }
-
-        .nav-link.active {
-            background: #3b82f6;
-            color: white;
-        }
-
-        .nav-link.active:hover {
-            background: #2563eb;
-        }
-
-        .nav-link.danger:hover {
-            background: #fef2f2;
-            color: #dc2626;
-        }
-
-        /* Layout */
-        .admin-layout { display: flex; }
-        #sidebar { width: var(--sidebar-width) !important; flex: 0 0 var(--sidebar-width); }
-        .main-content { margin-left: var(--sidebar-width); flex: 1; display: flex; flex-direction: column; }
-
-        /* Main Container */
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        .page-header {
-            margin-bottom: 2rem;
-        }
-
-        .page-title {
-            font-size: 1.875rem;
+        .header-title {
+            font-size: 1.75rem; 
             font-weight: 700;
-            color: #1e293b;
-            margin-bottom: 0.5rem;
+            color: var(--text-dark);
         }
-
-        .page-subtitle {
-            color: #64748b;
-            font-size: 1rem;
+        .header-actions { display: flex; align-items: center; gap: 1rem; }
+        .search-wrapper { position: relative; }
+        .search-wrapper i {
+            position: absolute; left: 1rem; top: 50%;
+            transform: translateY(-50%); color: var(--text-muted);
         }
-
-        /* Alert Messages */
-        .success-alert {
-            background: #dcfce7;
-            border: 1px solid #bbf7d0;
-            color: #166534;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 2rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
+        .search-input {
+            padding: 0.75rem 1rem 0.75rem 2.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background-color: var(--light-bg);
+            font-size: 0.9rem;
+            width: 280px;
+            transition: all 0.2s ease;
         }
-
-        .error-alert {
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            color: #dc2626;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 2rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
+        .search-input:focus {
+            outline: none; border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            background-color: var(--card-bg);
         }
-
-        .alert-icon {
-            width: 20px;
-            height: 20px;
+        .header-btn {
+            width: 44px; height: 44px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background-color: var(--card-bg);
+            display: grid; place-items: center;
+            font-size: 1.1rem; color: var(--text-body);
+            cursor: pointer; transition: all 0.2s ease;
+        }
+        .header-btn:hover { border-color: var(--primary-blue); color: var(--primary-blue); }
+        .user-avatar {
+            width: 44px; height: 44px;
             border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 12px;
+            background-color: var(--primary-purple);
+            color: var(--text-light);
+            display: grid; place-items: center;
+            font-weight: 600; font-size: 1.1rem;
+            border: 2px solid var(--card-bg);
+            box-shadow: 0 0 0 2px var(--primary-purple);
+            cursor: pointer;
         }
 
-        .success-icon {
-            background: #22c55e;
+        /* 5. Buttons */
+        .btn {
+            display: inline-flex; align-items: center;
+            gap: 0.5rem; padding: 0.65rem 1rem;
+            border-radius: var(--radius-md);
+            font-weight: 600; text-decoration: none;
+            border: none; cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
         }
-
-        .error-icon {
-            background: #dc2626;
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
         }
-
-        /* Stats Cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 2rem;
+        .btn-primary { background-color: var(--primary-blue); color: var(--text-light); }
+        .btn-primary:hover { background-color: var(--text-blue); box-shadow: var(--shadow-md); }
+        .btn-secondary {
+            background-color: var(--card-bg);
+            color: var(--text-body);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
         }
+        .btn-secondary:hover { background-color: var(--light-bg); border-color: #d1d5db; }
+        .btn-danger { background-color: var(--danger-text); color: var(--text-light); }
+        .btn-danger:hover { background-color: #b91c1c; box-shadow: var(--shadow-md); }
 
-        .stat-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            display: flex;
-            align-items: center;
-            gap: 1rem;
+        /* 6. Card */
+        .grid-card {
+            background-color: var(--card-bg);
+            border-radius: var(--radius-xl);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 1.5rem;
         }
-
-        .stat-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-        }
-
-        .stat-content h3 {
-            font-size: 1.875rem;
-            font-weight: 700;
-            color: #1e293b;
-            margin-bottom: 0.25rem;
-        }
-
-        .stat-content p {
-            color: #64748b;
-            font-size: 0.875rem;
-        }
-
-        /* Table Card */
-        .table-card {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-            margin-bottom: 2rem;
-        }
-
-        .table-header {
-            padding: 1.5rem 2rem;
-            border-bottom: 1px solid #e2e8f0;
+        .grid-card-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
         }
-
-        .table-title {
+        .card-title {
             font-size: 1.25rem;
             font-weight: 600;
-            color: #1e293b;
+            color: var(--text-dark);
+        }
+        .grid-card-body {
+            padding: 0; /* Remove padding for full-width table */
+        }
+        .grid-card-body-padded {
+            padding: 1.5rem;
         }
 
-        .table-actions {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .refresh-btn {
-            background: #f1f5f9;
-            color: #64748b;
-            border: none;
-            padding: 0.5rem;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.875rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .refresh-btn:hover {
-            background: #e2e8f0;
-            color: #475569;
-        }
-
-        .table-container {
-            overflow-x: auto;
-        }
-
-        .data-table {
+        /* 7. Table */
+        .table-wrapper { overflow-x: auto; }
+        .user-table {
             width: 100%;
             border-collapse: collapse;
+            font-size: 0.9rem;
         }
-
-        .data-table th {
-            background: #f8fafc;
-            padding: 0.75rem 1rem;
+        .user-table th, .user-table td {
+            padding: 0.85rem 1.5rem;
             text-align: left;
-            font-weight: 600;
-            font-size: 0.875rem;
-            color: #475569;
-            border-bottom: 1px solid #e2e8f0;
+            border-bottom: 1px solid var(--border-color);
             white-space: nowrap;
         }
-
-        .data-table th:nth-child(2),
-        .data-table th:nth-child(3) {
-            text-align: center;
+        .user-table thead {
+            background-color: var(--light-bg);
         }
-
-        .data-table th:last-child {
-            text-align: right;
-        }
-
-        .data-table td {
-            padding: 1rem;
-            border-bottom: 1px solid #f1f5f9;
-            font-size: 0.875rem;
-            vertical-align: middle;
-        }
-
-        .data-table td:nth-child(2),
-        .data-table td:nth-child(3) {
-            text-align: center;
-        }
-
-        .data-table td:last-child {
-            padding-right: 2rem;
-            text-align: right;
-        }
-
-        .data-table tbody tr:hover {
-            background: #f8fafc;
-        }
-
-        .data-table tbody tr:last-child td {
-            border-bottom: none;
-        }
-
-        /* Badges */
-        .id-badge {
-            background: #e0e7ff;
-            color: #3730a3;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
+        .user-table th {
+            font-size: 0.8rem;
             font-weight: 600;
-            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
-
-        .response-badge {
-            background: #dcfce7;
-            color: #166534;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
+        .user-table tbody tr:hover {
+            background-color: var(--light-bg);
+        }
+        .user-table td .badge {
             font-weight: 500;
-            font-size: 0.75rem;
         }
-
-        .response-badge.zero {
-            background: #fef2f2;
-            color: #dc2626;
-        }
-
-        /* Buttons */
-        .view-btn {
-            background: #10b981;
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
+        .badge {
             display: inline-flex;
             align-items: center;
-            gap: 0.5rem;
-        }
-
-        .view-btn:hover {
-            background: #059669;
-        }
-
-        .delete-btn {
-            background: #ef4444;
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            font-size: 0.875rem;
+            gap: 0.375rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: var(--radius-full);
+            font-size: 0.8rem;
             font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            display: inline-flex;
+            background: var(--light-bg);
+            color: var(--text-body);
+            border: 1px solid var(--border-color);
+        }
+        .badge-blue {
+            background-color: var(--info-bg);
+            color: var(--info-text);
+            border-color: transparent;
+        }
+        .badge-green {
+            background-color: var(--success-bg);
+            color: var(--success-text);
+            border-color: transparent;
+        }
+        .badge-red {
+            background-color: var(--danger-bg);
+            color: var(--danger-text);
+            border-color: transparent;
+        }
+        .action-buttons { display: flex; gap: 0.5rem; justify-content: flex-end; }
+        
+        /* 8. Modals */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(17, 24, 39, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 1001;
+            display: none;
             align-items: center;
-            gap: 0.5rem;
-            margin-left: 0.5rem;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
         }
-
-        .delete-btn:hover {
-            background: #dc2626;
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
         }
-
-        /* No Data State */
-        .no-data {
-            text-align: center;
-            padding: 4rem 2rem;
-            color: #64748b;
+        .modal-content {
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: var(--radius-xl);
+            max-width: 600px;
+            width: 90%;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            transform: scale(0.95) translateY(10px);
+            transition: all 0.2s ease-out;
         }
-
-        .no-data-icon {
-            width: 64px;
-            height: 64px;
-            background: #f1f5f9;
-            border-radius: 12px;
+        .modal-overlay.active .modal-content {
+            transform: scale(1) translateY(0);
+        }
+        .modal-close {
+            position: absolute; top: 0.75rem; right: 0.75rem;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: none; border: none;
+            font-size: 1.5rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: grid; place-items: center;
+            transition: all 0.2s ease;
+        }
+        .modal-close:hover { background-color: var(--light-bg); color: var(--text-dark); }
+        .modal-content h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 1.5rem;
+        }
+        
+        /* 9. Loader */
+        .loader-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(5px);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .loader-spinner {
+            border: 5px solid var(--border-color);
+            border-top: 5px solid var(--primary-blue);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* 10. NEW STYLES for this page */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card-new {
             display: flex;
             align-items: center;
-            justify-content: center;
-            margin: 0 auto 1rem;
-            color: #94a3b8;
-            font-size: 24px;
+            gap: 1rem;
+        }
+        .stat-icon-new {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+        .stat-info-new .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-dark);
+            line-height: 1.2;
+        }
+        .stat-info-new .stat-label {
+            font-size: 0.9rem;
+            color: var(--text-body);
+        }
+        
+        /* No Data Placeholder */
+        .no-data-placeholder {
+            text-align: center;
+            padding: 3rem 1.5rem;
+        }
+        .no-data-placeholder i {
+            font-size: 3rem;
+            color: var(--text-muted);
+            opacity: 0.5;
+            margin-bottom: 1rem;
+        }
+        .no-data-placeholder h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 0.25rem;
+        }
+        .no-data-placeholder p {
+            color: var(--text-body);
         }
 
-        .no-data h3 {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: #475569;
+        /* View Form Modal Styles */
+        #viewFormModal .modal-content {
+            max-width: 700px;
+        }
+        #viewFormModal h2 {
+            font-size: 1.25rem;
             margin-bottom: 0.5rem;
         }
-
-        /* Action Buttons */
-        .action-section {
-            text-align: center;
-            padding: 2rem 0;
+        #viewFormModal .form-meta {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
         }
-
-        .back-btn {
-            background: #3b82f6;
-            color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            transition: background-color 0.2s;
+        #viewFormModal .form-meta .badge {
+            margin: 0 0.25rem;
         }
-
-        .back-btn:hover {
-            background: #2563eb;
-        }
-
-        /* Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(30, 41, 59, 0.4);
-            z-index: 9999;
-            align-items: center;
-            justify-content: center;
-            backdrop-filter: blur(4px);
-        }
-
-        .modal-content {
-            background: white;
-            border-radius: 12px;
-            max-width: 900px;
-            width: 95vw;
-            margin: auto;
-            padding: 2rem;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            position: relative;
-            max-height: 90vh;
+        #viewFormModal .question-list {
+            max-height: 60vh;
             overflow-y: auto;
-        }
-
-        .modal-close {
-            position: absolute;
-            top: 1rem;
-            right: 1rem;
-            background: none;
-            border: none;
-            font-size: 1.5rem;
-            color: #64748b;
-            cursor: pointer;
             padding: 0.5rem;
-            border-radius: 6px;
-            transition: all 0.2s;
+            background: var(--light-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+        }
+        #viewFormModal .question-list ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        #viewFormModal .question-list li {
+            padding: 0.75rem 1rem;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+        #viewFormModal .question-list li:last-child {
+            margin-bottom: 0;
+        }
+        #viewFormModal .question-list li strong {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--primary-blue);
+            flex-shrink: 0;
+            margin-top: 0.15rem;
         }
 
-        .modal-close:hover {
-            background: #f1f5f9;
-            color: #475569;
+        /* 11. Responsive */
+        @media (max-width: 992px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
         }
-
-        .loading {
-            text-align: center;
-            padding: 2rem;
-            color: #64748b;
-        }
-
-        .spinner {
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-right: 0.5rem;
-        }
-
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        /* Footer */
-    .footer {
-      background: var(--white);
-      color: var(--gray-600);
-      font-size: 0.875rem;
-      text-align: center;
-      padding: 2rem 1.5rem;
-      border-top: 1px solid var(--gray-200);
-      margin-top: auto;
-    }
-
-    .footer-content {
-      max-width: 1280px;
-      margin: 0 auto;
-    }
-
-    .footer-text {
-      margin-bottom: 0.5rem;
-    }
-
-    .footer-subtext {
-      font-size: 0.75rem;
-      opacity: 0.8;
-    }
-
-    /* Mobile Responsive */
-    @media (max-width: 768px) {
-      .header-container {
-          padding: 0 1rem;
-      }
-
-      .nav-menu {
-          display: none;
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          background: var(--white);
-          border-top: 1px solid var(--gray-200);
-          flex-direction: column;
-          padding: 1rem;
-          gap: 0.25rem;
-          box-shadow: var(--shadow-md);
-      }
-
-      .nav-menu.mobile-open {
-          display: flex;
-      }
-
-      .mobile-menu-button {
-          display: block;
-      }
-
-      .main-content {
-        padding: 1rem 0.75rem;
-      }
-      
-      .welcome-section {
-        margin-bottom: 1.5rem;
-      }
-
-      .welcome-title {
-        font-size: 1.5rem;
-      }
-
-      .welcome-subtitle {
-        font-size: 0.875rem;
-      }
-      
-      .profile-card {
-        padding: 1.5rem 1rem;
-        margin-bottom: 1.5rem;
-      }
-
-      .profile-avatar {
-        width: 64px;
-        height: 64px;
-        font-size: 1.5rem;
-      }
-
-      .profile-name {
-        font-size: 1.25rem;
-      }
-      
-      .info-grid {
-        grid-template-columns: 1fr;
-        gap: 1rem;
-      }
-
-      .info-card {
-        padding: 1rem;
-      }
-      
-      .action-grid {
-        grid-template-columns: 1fr;
-        gap: 1rem;
-      }
-
-      .action-card {
-        padding: 1.25rem;
-      }
-
-      .action-icon {
-        width: 40px;
-        height: 40px;
-        font-size: 1.25rem;
-      }
-      
-      .quick-links-grid {
-        grid-template-columns: 1fr;
-        gap: 0.5rem;
-      }
-
-      .quick-links {
-        padding: 1rem;
-      }
-
-      .section-title {
-        font-size: 1.125rem;
-      }
-
-      .footer {
-        padding: 1.5rem 0.75rem;
-      }
-
-      .footer-text {
-        font-size: 0.75rem;
-      }
-
-      .footer-subtext {
-        font-size: 0.625rem;
-      }
-    }
-     /* Responsive */
         @media (max-width: 768px) {
-            .header-container {
-                padding: 1rem;
-            }
-
-            .mobile-menu-button {
-                display: block;
-            }
-
-            .nav-menu {
-                display: none;
-                position: absolute;
-                top: 100%;
-                left: 0;
-                right: 0;
-                background: white;
-                flex-direction: column;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                border-top: 1px solid #e2e8f0;
-                padding: 1rem;
-                gap: 0.5rem;
-            }
-
-            .nav-menu.active {
-                display: flex;
-            }
-
-            .nav-link {
-                width: 100%;
-                justify-content: flex-start;
-                padding: 0.75rem 1rem;
-            }
-
-            .container {
-                padding: 1rem;
-            }
-
-            .page-title {
-                font-size: 1.5rem;
-            }
-
-            .table-card {
-                border-radius: 8px;
-            }
-
-            .table-header {
-                padding: 1rem;
-                flex-direction: column;
-                gap: 1rem;
-                align-items: flex-start;
-            }
-
-            .data-table th,
-            .data-table td {
-                padding: 0.5rem;
-                font-size: 0.8rem;
-            }
-
-            .modal-content {
-                padding: 1rem;
-            }
+            .main-content { margin-left: 0; }
+            .sidebar { display: none; }
+            .content-area { padding: 1.5rem 1rem; }
+            .header { padding: 0 1rem; }
+            .header-title { display: none; }
+            .header .search-wrapper { display: none; }
         }
+
     </style>
 </head>
 <body>
+    
+    <div id="loadingOverlay" class="loader-overlay">
+        <div class="loader-spinner"></div>
+    </div>
+
     <div class="admin-layout">
+        
         <?php include __DIR__ . '/includes/sidebar.php'; ?>
+
         <main class="main-content">
-    <!-- Header -->
-    <header class="header">
-        <div class="header-container">
-            <a href="dashboard.php" class="logo">
-                <div class="logo-icon">
-                    <i class="fas fa-shield-alt"></i>
+            
+            <header class="header">
+                <h1 class="header-title">Manage Forms</h1>
+                
+                <div class="header-actions">
+                    <button class="header-btn" title="Toggle Theme" id="themeToggleBtn">
+                        <i class="fas fa-sun"></i>
+                    </button>
+                    <button class="header-btn" title="Notifications">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    
+                    <div class="user-avatar" title="Admin">AD</div>
                 </div>
-                <span>Admin Portal</span>
-            </a>
-            <button class="mobile-menu-button" onclick="toggleMobileMenu()">
-                <i class="fas fa-bars"></i>
-            </button>
-            <nav class="nav-menu" id="navMenu">
-                <a href="dashboard.php" class="nav-link">
-                    <i class="fas fa-tachometer-alt"></i>
-                    <span>Dashboard</span>
-                </a>
-                <a href="../includes/logout.php" class="nav-link danger">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Logout</span>
-                </a>
-            </nav>
-        </div>
-    </header>
-
-    <!-- Main Content Wrapper -->
-    <div class="main-wrapper">
-        <div class="container">
-            <div class="page-header">
-                <h1 class="page-title">Manage Feedback Forms</h1>
-                <p class="page-subtitle">View and manage all feedback forms in the system. Delete forms that are no longer needed.</p>
-            </div>
-
-            <?php if (!empty($message)): ?>
-                <div class="success-alert">
-                    <div class="alert-icon success-icon">✓</div>
-                    <?= htmlspecialchars($message) ?>
-                </div>
-            <?php endif; ?>
-
-            <?php if (!empty($error_message)): ?>
-                <div class="error-alert">
-                    <div class="alert-icon error-icon">✕</div>
-                    <?= htmlspecialchars($error_message) ?>
-                </div>
-            <?php endif; ?>
-
-            <!-- Stats -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon" style="background: #dbeafe; color: #1d4ed8;">
-                        <i class="fas fa-file-alt"></i>
+            </header>
+            
+            <div class="content-area">
+                
+                <div class="dashboard-grid">
+                    <div class="grid-card">
+                        <div class="grid-card-body-padded">
+                            <div class="stat-card-new">
+                                <div class="stat-icon-new" style="background-color: var(--info-bg); color: var(--info-text);">
+                                    <i class="fas fa-file-alt"></i>
+                                </div>
+                                <div class="stat-info-new">
+                                    <div class="stat-value"><?= count($forms) ?></div>
+                                    <div class="stat-label">Total Forms</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="stat-content">
-                        <h3><?= count($forms) ?></h3>
-                        <p>Total Forms</p>
+                    <div class="grid-card">
+                        <div class="grid-card-body-padded">
+                            <div class="stat-card-new">
+                                <div class="stat-icon-new" style="background-color: var(--success-bg); color: var(--success-text);">
+                                    <i class="fas fa-chart-line"></i>
+                                </div>
+                                <div class="stat-info-new">
+                                    <div class="stat-value"><?= array_sum(array_column($forms, 'response_count')) ?></div>
+                                    <div class="stat-label">Total Responses</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon" style="background: #d1fae5; color: #059669;">
-                        <i class="fas fa-chart-line"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3><?= array_sum(array_column($forms, 'response_count')) ?></h3>
-                        <p>Total Responses</p>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon" style="background: #fef3c7; color: #d97706;">
-                        <i class="fas fa-users"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3><?= count(array_unique(array_column($forms, 'faculty_id'))) ?></h3>
-                        <p>Unique Faculty</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="table-card">
-                <div class="table-header">
-                    <h2 class="table-title">All Feedback Forms</h2>
-                    <div class="table-actions">
-                        <button class="refresh-btn" onclick="location.reload()">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
+                    <div class="grid-card">
+                         <div class="grid-card-body-padded">
+                            <div class="stat-card-new">
+                                <div class="stat-icon-new" style="background-color: var(--warning-bg); color: var(--warning-text);">
+                                    <i class="fas fa-users"></i>
+                                </div>
+                                <div class="stat-info-new">
+                                    <div class="stat-value"><?= count(array_unique(array_column($forms, 'faculty_id'))) ?></div>
+                                    <div class="stat-label">Unique Faculty</div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <?php if (count($forms) > 0): ?>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Form Details</th>
-                                    <th>Responses</th>
-                                    <th>Created</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($forms as $form): ?>
-                                    <tr>
-                                        <td>
-                                            <div>
-                                                <span class="id-badge">
+                <div class="grid-card">
+                    <div class="grid-card-header">
+                        <h3 class="card-title">All Feedback Forms</h3>
+                        <div class="table-actions">
+                            <button class="btn btn-secondary btn-sm" onclick="location.reload()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="grid-card-body">
+                        <?php if (count($forms) > 0): ?>
+                            <div class="table-wrapper">
+                                <table class="user-table" id="formsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Form Number</th>
+                                            <th>Details</th>
+                                            <th>Responses</th>
+                                            <th>Created</th>
+                                            <th style="text-align: right;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($forms as $form): ?>
+                                        <tr>
+                                            <td>
+                                                <span class="badge badge-blue">
                                                     <?= htmlspecialchars($form['form_number']) ?>
                                                 </span>
-                                            </div>
-                                            <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b;">
-                                                <?= htmlspecialchars($form['department']) ?> | Year <?= $form['year'] ?> | Sem <?= $form['semester'] ?>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span class="response-badge <?= $form['response_count'] == 0 ? 'zero' : '' ?>">
-                                                <?= $form['response_count'] ?> responses
-                                            </span>
-                                        </td>
-                                        <td style="font-size: 0.75rem; color: #64748b;">
-                                            <?= date('M j, Y', strtotime($form['created_at'])) ?><br>
-                                            <?= date('g:i A', strtotime($form['created_at'])) ?>
-                                        </td>
-                                        <td>
-                                            <button class="view-btn view-form-btn" 
-                                                data-form-number="<?= htmlspecialchars($form['form_number']) ?>">
-                                                <i class="fas fa-eye"></i> View
-                                            </button>
-                                            <form method="post" style="display:inline;">
-                                                <input type="hidden" name="delete_form_id" value="<?= $form['id'] ?>">
-                                                <button type="submit" class="delete-btn" 
-                                                    onclick="return confirm('Are you sure you want to delete this form?\n\nForm: <?= htmlspecialchars($form['form_number']) ?>\nFaculty: <?= htmlspecialchars($form['faculty_name']) ?>\nResponses: <?= $form['response_count'] ?>\n\nThis action cannot be undone.');">
-                                                    <i class="fas fa-trash"></i> Delete
-                                                </button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                                            </td>
+                                            <td>
+                                                <div style="font-weight: 500; color: var(--text-dark);"><?= htmlspecialchars($form['department']) ?></div>
+                                                <div style="font-size: 0.8rem; color: var(--text-muted);">
+                                                    Year <?= $form['year'] ?> | Sem <?= $form['semester'] ?>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="badge <?= $form['response_count'] == 0 ? 'badge-red' : 'badge-green' ?>">
+                                                    <?= $form['response_count'] ?> Responses
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div style="font-size: 0.85rem; color: var(--text-body);"><?= date('M j, Y', strtotime($form['created_at'])) ?></div>
+                                                <div style="font-size: 0.8rem; color: var(--text-muted);"><?= date('g:i A', strtotime($form['created_at'])) ?></div>
+                                            </td>
+                                            <td>
+                                                <div class="action-buttons">
+                                                    <button class="btn btn-secondary btn-sm view-form-btn" 
+                                                            data-form-number="<?= htmlspecialchars($form['form_number']) ?>">
+                                                        <i class="fas fa-eye"></i> View
+                                                    </button>
+                                                    <button class="btn btn-danger btn-sm" 
+                                                            onclick="openDeleteConfirmationModal(<?= $form['id'] ?>, '<?= htmlspecialchars($form['form_number']) ?>', <?= $form['response_count'] ?>)">
+                                                        <i class="fas fa-trash"></i> Delete
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php else: ?>
+                            <div class="no-data-placeholder">
+                                <i class="fas fa-inbox"></i>
+                                <h3>No Forms Found</h3>
+                                <p>You haven't created any feedback forms yet.</p>
+                            </div>
+                        <?php endif; ?>
                     </div>
-                <?php else: ?>
-                    <div class="no-data">
-                        <div class="no-data-icon">
-                            <i class="fas fa-inbox"></i>
-                        </div>
-                        <h3>No Forms Found</h3>
-                        <p>There are currently no feedback forms in the system.</p>
-                    </div>
-                <?php endif; ?>
-            </div>
-
-            <div class="action-section">
-                <a href="dashboard.php" class="back-btn">
-                    <i class="fas fa-arrow-left"></i> Back to Dashboard
-                </a>
-            </div>
+                </div>
+                
+            </div> </main> </div> <div id="messageModal" class="modal-overlay">
+        <div class="modal-content" style="text-align: center; max-width: 450px;">
+            <button class="modal-close" onclick="closeModal('messageModal')">&times;</button>
+            <div id="messageIcon" style="font-size: 3rem; margin-bottom: 1rem;"></div>
+            <h2 id="messageText" style="margin-bottom: 1.5rem; font-size: 1.1rem; line-height: 1.6;"></h2>
+            <button class="btn btn-primary" onclick="closeModal('messageModal')">Close</button>
         </div>
-        </main>
+    </div>
+    
+    <div id="deleteConfirmationModal" class="modal-overlay">
+        <div class="modal-content" style="text-align: center; max-width: 420px;">
+            <div style="font-size: 3rem; margin-bottom: 1rem; color: var(--danger-text);"><i class="fas fa-exclamation-triangle"></i></div>
+            <h2 style="margin-bottom: 0.5rem;">Are you sure?</h2>
+            <p id="deleteConfirmationText" style="margin-bottom: 1.5rem; font-size: 1rem;">This action cannot be undone.</p>
+            <form id="deleteForm" method="POST" onsubmit="showLoader()">
+                <input type="hidden" id="delete_form_id" name="delete_form_id">
+                <div style="display: flex; gap: 0.75rem; justify-content: center;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmationModal')">Cancel</button>
+                    <button type="submit" id="delete_submit_button" name="delete_form" class="btn btn-danger">Yes, Delete Form</button>
+                </div>
+            </form>
+        </div>
     </div>
 
-    <!-- Modal for Form Details -->
-    <div id="formModal" class="modal">
+    <div id="viewFormModal" class="modal-overlay">
         <div class="modal-content">
-            <button class="modal-close" onclick="closeModal()">&times;</button>
-            <div id="modalContent" class="loading">
-                <i class="fas fa-spinner spinner"></i> Loading form details...
+             <button class="modal-close" onclick="closeModal('viewFormModal')">&times;</button>
+            <h2 id="viewFormTitle">Form Details</h2>
+            <div id="viewFormMeta" class="form-meta">Loading...</div>
+            <div class="question-list">
+                <ul id="viewFormQuestions">
+                    </ul>
             </div>
         </div>
     </div>
 
-    <!-- Footer -->
-     <footer class="footer">
-    <div class="footer-content">
-      <div class="footer-text">&copy; <?php echo date('Y'); ?> College Feedback Portal. All rights reserved.</div>
-      <div class="footer-subtext">Enhancing education through continuous feedback and improvement</div>
-    </div>
-  </footer>
-
+    
     <script>
-        function toggleMobileMenu() {
-            const menu = document.getElementById('navMenu');
-            menu.classList.toggle('active');
+        function showLoader() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
         }
 
-        function openModal() {
-            document.getElementById('formModal').style.display = 'flex';
-            document.body.style.overflow = 'hidden';
+        function openModal(modalId) { 
+            const modal = document.getElementById(modalId);
+            if(modal) modal.classList.add('active');
         }
-
-        function closeModal() {
-            document.getElementById('formModal').style.display = 'none';
-            document.body.style.overflow = 'auto';
+        function closeModal(modalId) { 
+            const modal = document.getElementById(modalId);
+            if(modal) modal.classList.remove('active');
         }
-
-        // Close modal when clicking outside
-        document.getElementById('formModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeModal();
+        
+        function showMessageModal(message, type) {
+            const modal = document.getElementById('messageModal');
+            const icon = modal.querySelector('#messageIcon');
+            const text = modal.querySelector('#messageText');
+            if (type === 'success') {
+                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-text);"></i>';
+            } else {
+                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-text);"></i>';
             }
-        });
-
-        // Handle view form button clicks
+            text.innerHTML = message.replace(/\n/g, '<br>'); // Use innerHTML for <br>
+            openModal('messageModal');
+        }
+        
+        function openDeleteConfirmationModal(formId, formNumber, responseCount) {
+            document.getElementById('delete_form_id').value = formId;
+            const text = document.getElementById('deleteConfirmationText');
+            text.innerHTML = `Do you really want to delete form <strong>${formNumber}</strong>?<br>This will also delete all <strong>${responseCount}</strong> associated responses. This action cannot be undone.`;
+            openModal('deleteConfirmationModal');
+        }
+        
+        // --- View Form AJAX ---
         document.querySelectorAll('.view-form-btn').forEach(button => {
             button.addEventListener('click', function() {
                 const formNumber = this.dataset.formNumber;
@@ -1075,7 +854,11 @@ try {
         });
 
         function loadFormDetails(formNumber) {
-            openModal();
+            openModal('viewFormModal');
+            // Set loading state
+            document.getElementById('viewFormTitle').textContent = 'Loading Details...';
+            document.getElementById('viewFormMeta').innerHTML = `<span class="badge">${formNumber}</span>`;
+            document.getElementById('viewFormQuestions').innerHTML = '<li><i class="fas fa-spinner fa-spin"></i> Loading questions...</li>';
             
             fetch(`?action=get_form_details&form_number=${encodeURIComponent(formNumber)}`)
                 .then(response => response.json())
@@ -1083,72 +866,83 @@ try {
                     if (data.success) {
                         displayFormDetails(data.form);
                     } else {
-                        document.getElementById('modalContent').innerHTML = `
-                            <div style="text-align: center; color: #dc2626;">
-                                <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 1rem;"></i>
-                                <h3>Error Loading Form</h3>
-                                <p>${data.error}</p>
-                            </div>
-                        `;
+                        document.getElementById('viewFormQuestions').innerHTML = `<li>Error: ${data.error}</li>`;
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    document.getElementById('modalContent').innerHTML = `
-                        <div style="text-align: center; color: #dc2626;">
-                            <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 1rem;"></i>
-                            <h3>Error Loading Form</h3>
-                            <p>An error occurred while loading the form details.</p>
-                        </div>
-                    `;
+                    document.getElementById('viewFormQuestions').innerHTML = '<li>An error occurred while loading.</li>';
                 });
         }
 
         function displayFormDetails(form) {
+            document.getElementById('viewFormTitle').textContent = 'Form Questions';
+            document.getElementById('viewFormMeta').innerHTML = `
+                <span class="badge badge-blue">${form.form_number}</span>
+                <span class="badge">${form.department}</span>
+                <span class="badge">Year ${form.year}</span>
+                <span class="badge">Sem ${form.semester}</span>
+            `;
+            
             let questionsHtml = '';
             if (form.questions && form.questions.length > 0) {
                 questionsHtml = form.questions.map((q, index) => `
-                    <div style="padding: 1rem; background: #f8fafc; border-radius: 8px; margin-bottom: 0.75rem; border-left: 4px solid #3b82f6;">
-                        <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
-                            <span style="background: #3b82f6; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 0.875rem; font-weight: 600; flex-shrink: 0;">${index + 1}</span>
-                            <p style="margin: 0; font-size: 0.95rem; line-height: 1.5; color: #1e293b;">${q.question_text}</p>
-                        </div>
-                    </div>
+                    <li><strong>Q${index + 1}:</strong> <span>${q}</span></li>
                 `).join('');
             } else {
-                questionsHtml = '<p style="color: #64748b; font-style: italic; text-align: center; padding: 2rem;">No questions found for this form.</p>';
+                questionsHtml = '<li>No questions found for this form.</li>';
             }
-
-            document.getElementById('modalContent').innerHTML = `
-                <div>
-                    <div style="text-align: center; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e2e8f0;">
-                        <h2 style="color: #1e293b; margin-bottom: 0.5rem;">Feedback Questions</h2>
-                        <p style="color: #64748b; font-size: 0.875rem;">Form: <strong>${form.form_number}</strong> • ${form.total_questions} Questions</p>
-                    </div>
-                    
-                    <div style="max-height: 400px; overflow-y: auto; padding-right: 0.5rem;">
-                        ${questionsHtml}
-                    </div>
-                    
-                    <div style="text-align: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0;">
-                        <button onclick="closeModal()" style="background: #3b82f6; color: white; border: none; padding: 0.75rem 2rem; border-radius: 6px; font-weight: 500; cursor: pointer; transition: background-color 0.2s;">
-                            Close
-                        </button>
-                    </div>
-                </div>
-            `;
+            document.getElementById('viewFormQuestions').innerHTML = questionsHtml;
         }
 
+        // --- Global JS ---
+        document.addEventListener('DOMContentLoaded', function() {
+            // Show session message if it exists
+            <?php if (!empty($message) || !empty($error_message)): ?>
+                showMessageModal(
+                    '<?php echo addslashes(empty($message) ? $error_message : $message); ?>',
+                    '<?php echo empty($message) ? 'error' : 'success'; ?>'
+                );
+            <?php endif; ?>
+
+            // Theme Toggle
+            const themeToggleBtn = document.getElementById('themeToggleBtn');
+            if(themeToggleBtn) {
+                // Check local storage for theme
+                if (localStorage.getItem('theme') === 'dark') {
+                    document.body.classList.add('dark-theme');
+                    themeToggleBtn.querySelector('i').classList.replace('fa-sun', 'fa-moon');
+                }
+
+                themeToggleBtn.addEventListener('click', () => {
+                    document.body.classList.toggle('dark-theme');
+                    const icon = themeToggleBtn.querySelector('i');
+                    if (document.body.classList.contains('dark-theme')) {
+                        icon.classList.replace('fa-sun', 'fa-moon');
+                        localStorage.setItem('theme', 'dark');
+                    } else {
+                        icon.classList.replace('fa-moon', 'fa-sun');
+                        localStorage.setItem('theme', 'light');
+                    }
+                });
+            }
+        });
+
+        // Close modal on outside click
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal-overlay')) {
+                closeModal(event.target.id);
+            }
+        }
+        
         // Close modal on Escape key
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
-                closeModal();
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => {
+                    closeModal(modal.id);
+                });
             }
         });
     </script>
-    </div>
 </body>
 </html>
-
-
-
