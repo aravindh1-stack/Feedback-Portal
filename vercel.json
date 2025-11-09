@@ -5,5 +5,11 @@
       "src": "/**/*.php",
       "use": "@vercel/php"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.php"
+    }
   ]
 }
