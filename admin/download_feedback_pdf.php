@@ -1,6 +1,16 @@
 <?php
-require_once '../config/db.php'; // Your database connection
-require_once __DIR__ . '/../fpdf186/fpdf.php';
+// Entha session'il user login seithullara enbathaiyum, avarudaya role'aiyum ariya, session'ai thodanga.
+session_start();
+
+// User login seyyamal irunthalo allathu admin aaga illamalo irunthal, login pakkathirku thiruppi anuppa vendum.
+if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+    header('Location: ../index.php');
+    exit();
+}
+
+// Include database connection
+require_once '../config/db.php';
+require_once __DIR__ . '/../fpdf186/fpdf.php'; // Make sure this path is correct
 
 // A custom PDF class to handle the specific header and footer
 class FinalReportPDF extends FPDF
@@ -8,15 +18,19 @@ class FinalReportPDF extends FPDF
     // Page header
     public function Header()
     {
-        $this->Image(__DIR__ . '/../assets/images/college_logo.png', 10, 10, 50);
+        // Unga server-la intha path correct-a irukka-nu check pannikonga
+        $logoPath = __DIR__ . '/../assets/images/college_logo.png';
+        if (file_exists($logoPath)) {
+            $this->Image($logoPath, 10, 10, 50);
+        }
         
         $this->SetY(14);
-        $this->SetX(65);
+        $this->SetX(65); // 10mm (margin) + 50mm (logo width) + 5mm (padding)
         $this->SetFont('Arial', 'B', 14);
         $this->SetTextColor(0, 0, 0);
         $this->Cell(0, 8, 'Sri Shanmugha College of Engineering and Technology', 0, 1, 'C');
         
-        $this->SetX(65);
+        $this->SetX(65); // Align this text also
         $this->SetFont('Arial', '', 10);
         $this->Cell(0, 6, '(Autonomous)', 0, 1, 'C');
 
@@ -24,7 +38,7 @@ class FinalReportPDF extends FPDF
         $this->SetFont('Arial', 'B', 12);
         $this->SetTextColor(192, 0, 0);
         $this->Cell(0, 10, 'Staff Feedback Analytics Report', 0, 1, 'C');
-        $this->Ln(2);
+        $this->Ln(5); // Add more space after header
     }
 
     // Page footer
@@ -42,9 +56,6 @@ class FinalReportPDF extends FPDF
 // HELPER FUNCTIONS
 // =============================================================================
 
-/**
- * NEW: Converts an integer to a Roman numeral.
- */
 function toRoman(string $number): string
 {
     $map = ['1' => 'I', '2' => 'II', '3' => 'III', '4' => 'IV', '5' => 'V', '6' => 'VI', '7' => 'VII', '8' => 'VIII'];
@@ -62,38 +73,57 @@ function getGradeDetails(float $percentage): array
 }
 
 // =============================================================================
-// DATABASE FUNCTIONS (IMPORTANT: ADAPT THESE QUERIES)
+// DATABASE FUNCTIONS (MODIFIED FOR ACCURACY)
 // =============================================================================
 
-function fetchReportData(mysqli $conn, array $filters): array
+function fetchReportData(mysqli $conn, string $form_where_clause, array $form_params, string $form_types, string $student_where_clause, array $student_params, string $student_types): array
 {
-    // --- IMPORTANT ---
-    // This is a placeholder function. You must adapt the SQL queries below.
+    // --- Summary Query ---
     
-    // Query for summary
-    $summary_sql = "SELECT 
-        (SELECT COUNT(DISTINCT s.id) FROM students s WHERE s.department = ? AND s.year = ? AND s.semester = ?) as class_strength,
-        COUNT(DISTINCT resp.student_id) as forms_submitted,
-        AVG(resp.rating) as average_rating
-        FROM feedback_responses resp JOIN students s ON resp.student_id = s.id
-        WHERE s.department = ? AND s.year = ? AND s.semester = ?";
-    $stmt = $conn->prepare($summary_sql);
-    $stmt->bind_param("ssisss", $filters['department'], $filters['year'], $filters['semester'], $filters['department'], $filters['year'], $filters['semester']);
+    // 1. Class Strength
+    $class_strength_sql = "SELECT COUNT(DISTINCT s.id) AS class_strength FROM students s $student_where_clause";
+    $stmt = $conn->prepare($class_strength_sql);
+    if (!empty($student_params)) $stmt->bind_param($student_types, ...$student_params);
     $stmt->execute();
-    $summary = $stmt->get_result()->fetch_assoc();
+    $class_strength = $stmt->get_result()->fetch_assoc()['class_strength'] ?? 0;
+    $stmt->close();
 
-    // Query for subject details
-    $details_sql = "SELECT f.subject_code, fac.name as faculty_name, AVG(fr.rating) as avg_rating
-        FROM feedback_responses fr
-        JOIN feedback_forms f ON fr.form_id = f.id
-        JOIN students s ON fr.student_id = s.id
-        JOIN faculty fac ON f.faculty_id = fac.id
-        WHERE s.department = ? AND s.year = ? AND s.semester = ?
-        GROUP BY f.subject_code, fac.name";
+    // 2. Responses & Avg Rating (Neenga ketta maathiri maathiyachu - Changed as you asked)
+    $responses_sql = "SELECT 
+                        COALESCE(AVG(fr.rating), 0) AS average_rating, 
+                        COUNT(DISTINCT fr.student_id) AS total_students_responded
+                      FROM feedback_responses fr 
+                      JOIN feedback_forms f ON fr.form_number = f.form_number
+                      $form_where_clause";
+    $stmt = $conn->prepare($responses_sql);
+    if (!empty($form_params)) $stmt->bind_param($form_types, ...$form_params);
+    $stmt->execute();
+    $responses_summary = $stmt->get_result()->fetch_assoc() ?: ['average_rating' => 0, 'total_students_responded' => 0];
+    $stmt->close();
+
+    $summary = [
+        'class_strength' => $class_strength,
+        'average_rating' => $responses_summary['average_rating'],
+        'total_students_responded' => $responses_summary['total_students_responded'] // Changed name
+    ];
+    
+    // --- Details Query ---
+    $details_sql = "SELECT 
+                        f.subject_code,
+                        COALESCE(fac.name, CONCAT('Faculty #', fr.faculty_id)) AS faculty_name,
+                        AVG(fr.rating) AS avg_rating
+                    FROM feedback_responses fr
+                    JOIN feedback_forms f ON fr.form_number = f.form_number 
+                        AND fr.subject_code = f.subject_code AND fr.faculty_id = f.faculty_id
+                    LEFT JOIN faculty fac ON fr.faculty_id = fac.id
+                    $form_where_clause
+                    GROUP BY f.subject_code, fr.faculty_id, fac.name
+                    ORDER BY f.subject_code";
     $stmt = $conn->prepare($details_sql);
-    $stmt->bind_param("ssi", $filters['department'], $filters['year'], $filters['semester']);
+    if (!empty($form_params)) $stmt->bind_param($form_types, ...$form_params);
     $stmt->execute();
     $details_result = $stmt->get_result();
+    $stmt->close();
     
     $subjectDetails = [];
     $allRatings = [];
@@ -139,10 +169,12 @@ function drawTitleBar(FPDF $pdf, string $title) {
     $pdf->SetFont('Arial', 'B', 10);
     $pdf->SetTextColor(0);
     $pdf->SetFillColor(230, 230, 230);
-    $pdf->Cell(0, 8, $title, 1, 1, 'C', true);
+    $pdf->Cell(190, 8, $title, 1, 1, 'C', true); // 190 total width
 }
 
 function drawSummarySection(FPDF $pdf, array $summary, array $filters) {
+    drawTitleBar($pdf, 'Overall Performance Summary');
+    
     $pdf->SetFont('Arial', 'B', 9);
     $pdf->SetTextColor(0);
     $pdf->SetDrawColor(150);
@@ -152,20 +184,23 @@ function drawSummarySection(FPDF $pdf, array $summary, array $filters) {
     $percentage = isset($summary['average_rating']) ? ($summary['average_rating'] / 5.0) * 100 : 0;
     $gradeDetails = getGradeDetails($percentage);
 
-    $pdf->Cell($cellWidth, $cellHeight, 'Class Strength: ' . ($summary['class_strength'] ?? 'N/A'), 1, 0, 'L');
-    $pdf->Cell($cellWidth, $cellHeight, 'Forms Submitted: ' . ($summary['forms_submitted'] ?? 'N/A'), 1, 0, 'L');
-    $pdf->Cell($cellWidth, $cellHeight, 'Department: ' . $filters['department'], 1, 0, 'L');
+    // Row 1
+    $pdf->Cell($cellWidth, $cellHeight, 'Department: ' . (!empty($filters['department']) ? $filters['department'] : 'All'), 1, 0, 'L');
+    $pdf->Cell($cellWidth, $cellHeight, 'Year: ' . (!empty($filters['year']) ? toRoman($filters['year']) : 'All'), 1, 0, 'L');
+    $pdf->Cell($cellWidth, $cellHeight, 'Semester: ' . (!empty($filters['semester']) ? toRoman($filters['semester']) : 'All'), 1, 0, 'L');
     $pdf->Cell($cellWidth, $cellHeight, 'Report Date: ' . date('d-M-Y'), 1, 1, 'L');
 
-    $pdf->Cell($cellWidth, $cellHeight, 'Average Rating: ' . round($summary['average_rating'] ?? 0, 2) . '/5.0', 1, 0, 'L');
-    $pdf->Cell($cellWidth, $cellHeight, 'Overall Grade: ' . $gradeDetails['grade'], 1, 0, 'L');
-    // MODIFICATION: Use toRoman() for year and semester
-    $pdf->Cell($cellWidth, $cellHeight, 'Year: ' . toRoman($filters['year']), 1, 0, 'L');
-    $pdf->Cell($cellWidth, $cellHeight, 'Semester: ' . toRoman($filters['semester']), 1, 1, 'L');
+    // Row 2
+    $pdf->Cell($cellWidth, $cellHeight, 'Class Strength: ' . ($summary['class_strength'] ?? 'N/A'), 1, 0, 'L');
+    $pdf->Cell($cellWidth, $cellHeight, 'Students Responded: ' . ($summary['total_students_responded'] ?? '0'), 1, 0, 'L');
+    $pdf->Cell($cellWidth, $cellHeight, 'Avg Rating: ' . round($summary['average_rating'] ?? 0, 2) . '/5.0', 1, 0, 'L');
+    $pdf->Cell($cellWidth, $cellHeight, 'Percentage: ' . round($percentage, 2) . '%', 1, 1, 'L');
     
-    $pdf->Cell($cellWidth, $cellHeight, 'Percentage: ' . round($percentage, 2) . '%', 1, 0, 'L');
+    // Row 3
+    $pdf->Cell($cellWidth, $cellHeight, 'Overall Grade: ' . $gradeDetails['grade'], 1, 0, 'L');
     $pdf->Cell($cellWidth * 2, $cellHeight, 'Performance Status: ' . $gradeDetails['status'], 1, 0, 'L');
-    $pdf->Cell($cellWidth, $cellHeight, '', 'TBR', 1, 'L');
+    $pdf->Cell($cellWidth, $cellHeight, '', 1, 1, 'L'); // Empty cell to fill the row
+    
     $pdf->Ln(5);
 }
 
@@ -173,7 +208,7 @@ function drawGradeDistributionSection(FPDF $pdf, array $gradeCounts, int $totalS
     drawTitleBar($pdf, 'Grade Distribution Analysis');
     $pdf->SetFont('Arial', 'B', 9);
     $pdf->SetFillColor(245, 245, 245);
-    $widths = [15, 20, 25, 30, 100];
+    $widths = [15, 20, 25, 30, 100]; // Total 190
 
     $pdf->Cell($widths[0], 7, 'Grade', 1, 0, 'C', true);
     $pdf->Cell($widths[1], 7, 'Count', 1, 0, 'C', true);
@@ -200,7 +235,7 @@ function drawGradeDistributionSection(FPDF $pdf, array $gradeCounts, int $totalS
 function drawStatsSection(FPDF $pdf, array $stats) {
     drawTitleBar($pdf, 'Statistical Analysis');
     $pdf->SetFont('Arial', '', 9);
-    $widths = [40, 25, 45, 25, 55];
+    $widths = [40, 25, 45, 25, 55]; // Total 190
     $range = $stats['highest'] - $stats['lowest'];
 
     $pdf->SetFont('Arial', 'B', 9);
@@ -226,7 +261,6 @@ function drawStatsSection(FPDF $pdf, array $stats) {
     $pdf->Ln(5);
 }
 
-// MODIFICATION: Removed Department, Year, Sem columns and redistributed widths
 function drawSubjectDetailsSection(FPDF $pdf, array $details) {
     drawTitleBar($pdf, 'Subject-wise Performance Details');
     $pdf->SetFont('Arial', 'B', 9);
@@ -241,7 +275,9 @@ function drawSubjectDetailsSection(FPDF $pdf, array $details) {
     $pdf->Cell($widths[4], 7, 'Performance Status', 1, 1, 'C', true);
 
     if (empty($details)) {
+        $pdf->SetFont('Arial', '', 9);
         $pdf->Cell(array_sum($widths), 10, 'No subject data available.', 1, 1, 'C');
+        $pdf->Ln(5);
         return;
     }
     $pdf->SetFont('Arial', '', 9);
@@ -259,29 +295,73 @@ function drawSubjectDetailsSection(FPDF $pdf, array $details) {
 // =============================================================================
 
 try {
+    // **PUTHU FILTER LOGIC**
+    $filter_dept = $_GET['department'] ?? '';
+    $filter_year = $_GET['year'] ?? '';
+    $filter_sem = $_GET['semester'] ?? '';
+    
+    // Intha filters array PDF-la kaatrathukku mattum thaan
     $filters = [
-        'department' => $_GET['dept'] ?? 'ECE',
-        'year'       => $_GET['year'] ?? '2',
-        'semester'   => $_GET['sem'] ?? '3',
+        'department' => $filter_dept,
+        'year'       => $filter_year,
+        'semester'   => $filter_sem,
     ];
 
-    $reportData = fetchReportData($conn, $filters);
+    // Build WHERE clause and params for JOINING on 'f' (feedback_forms)
+    $form_where_conditions = [];
+    $form_params = [];
+    $form_types = '';
+    if (!empty($filter_dept)) {
+        $form_where_conditions[] = "f.department = ?";
+        $form_params[] = $filter_dept;
+        $form_types .= 's';
+    }
+    if (!empty($filter_year)) {
+        $form_where_conditions[] = "f.year = ?";
+        $form_params[] = $filter_year;
+        $form_types .= 's';
+    }
+    if (!empty($filter_sem)) {
+        $form_where_conditions[] = "f.semester = ?";
+        $form_params[] = $filter_sem;
+        $form_types .= 's';
+    }
+    $form_where_clause = !empty($form_where_conditions) ? 'WHERE ' . implode(' AND ', $form_where_conditions) : '';
+
+    // Build WHERE clause and params for JOINING on 's' (students)
+    $student_where_conditions = [];
+    $student_params = [];
+    $student_types = '';
+    if (!empty($filter_dept)) {
+        $student_where_conditions[] = "s.department = ?";
+        $student_params[] = $filter_dept;
+        $student_types .= 's';
+    }
+    if (!empty($filter_year)) {
+        $student_where_conditions[] = "s.year = ?";
+        $student_params[] = $filter_year;
+        $student_types .= 's';
+    }
+    if (!empty($filter_sem)) {
+        $student_where_conditions[] = "s.semester = ?";
+        $student_params[] = $filter_sem;
+        $student_types .= 's';
+    }
+    $student_where_clause = !empty($student_where_conditions) ? 'WHERE ' . implode(' AND ', $student_where_conditions) : '';
+    
+    // **PUTHU FUNCTION CALL**
+    $reportData = fetchReportData(
+        $conn, 
+        $form_where_clause, $form_params, $form_types, 
+        $student_where_clause, $student_params, $student_types
+    );
 
     $pdf = new FinalReportPDF();
     $pdf->SetTitle('Staff Feedback Analytics Report');
     $pdf->SetAutoPageBreak(true, 20);
     $pdf->AddPage();
     
-    // MODIFICATION: Title changed from "Applied Filters"
-    drawTitleBar($pdf, 'Academic Details');
-    $pdf->SetFont('Arial','',9);
-    // MODIFICATION: Use toRoman() for year and semester
-    $pdf->Cell(190/3, 7, 'Department: '.$filters['department'], 1, 0, 'L');
-    $pdf->Cell(190/3, 7, 'Year: '.toRoman($filters['year']), 1, 0, 'L');
-    $pdf->Cell(190/3, 7, 'Semester: '.toRoman($filters['semester']), 1, 1, 'L');
-    $pdf->Ln(5);
-    
-    drawTitleBar($pdf, 'Overall Performance Summary');
+    // The NEW summary section handles the filters
     drawSummarySection($pdf, $reportData['summary'], $filters);
     
     drawGradeDistributionSection($pdf, $reportData['gradeCounts'], $reportData['stats']['total_subjects']);
@@ -289,6 +369,29 @@ try {
     drawStatsSection($pdf, $reportData['stats']);
 
     drawSubjectDetailsSection($pdf, $reportData['subjectDetails']);
+
+    // === MAATHAM 3 (Center Alignment): HOD and Principal Signature Area ===
+    $pdf->Ln(25); // Add space from the table above
+    $pdf->Ln(10); // Space for the actual signature
+
+    $pdf->SetFont('Arial', '', 10);
+    $pdf->SetTextColor(0);
+
+    // (Left Signature Line - Centered within its 95mm cell)
+    $pdf->Cell(95, 7, '_________________________', 0, 0, 'C');
+
+    // (Right Signature Line - Centered within its 95mm cell)
+    $pdf->Cell(95, 7, '_________________________', 0, 1, 'C');
+
+    $pdf->SetFont('Arial', 'B', 10); // Bold for the title
+
+    // (Left Signature Text - Centered within its 95mm cell)
+    $pdf->Cell(95, 7, 'HOD Signature', 0, 0, 'C');
+
+    // (Right Signature Text - Centered within its 95mm cell)
+    $pdf->Cell(95, 7, 'Principal Signature', 0, 1, 'C');
+    // === Maatham Mudinjadhu (Change End) ===
+
 
     $pdf->Output('D', 'Staff_Feedback_Report_' . date('Y-m-d') . '.pdf');
 

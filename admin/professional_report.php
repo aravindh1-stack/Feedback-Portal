@@ -19,14 +19,14 @@ $subject_details = [];
 
 if (!empty($department) && !empty($year) && !empty($semester)) {
     try {
-        // Get overall statistics
+        // Get overall statistics (join by form_number; count distinct form_number for forms)
         $stats_query = "SELECT 
             (SELECT COUNT(DISTINCT s.id) FROM students s WHERE s.department = ? AND s.year = ? AND s.semester = ?) as class_strength,
-            (SELECT COUNT(DISTINCT f.id) FROM feedback_forms f WHERE f.department = ? AND f.year = ? AND f.semester = ?) as forms_submitted,
+            (SELECT COUNT(DISTINCT f.form_number) FROM feedback_forms f WHERE f.department = ? AND f.year = ? AND f.semester = ?) as forms_submitted,
             COALESCE(AVG(fr.rating), 0) as avg_rating,
             COUNT(fr.id) as total_responses
             FROM feedback_responses fr
-            JOIN feedback_forms f ON fr.form_id = f.id
+            JOIN feedback_forms f ON fr.form_number = f.form_number
             WHERE f.department = ? AND f.year = ? AND f.semester = ?";
         
         $stmt = $conn->prepare($stats_query);
@@ -39,7 +39,7 @@ if (!empty($department) && !empty($year) && !empty($semester)) {
             fr.rating,
             COUNT(*) as count
             FROM feedback_responses fr
-            JOIN feedback_forms f ON fr.form_id = f.id
+            JOIN feedback_forms f ON fr.form_number = f.form_number
             WHERE f.department = ? AND f.year = ? AND f.semester = ?
             GROUP BY fr.rating";
         
@@ -91,10 +91,13 @@ if (!empty($department) && !empty($year) && !empty($semester)) {
                 ELSE 'Poor'
             END as performance_status
             FROM feedback_forms f
-            LEFT JOIN feedback_responses fr ON f.id = fr.form_id
+            LEFT JOIN feedback_responses fr 
+              ON fr.form_number = f.form_number 
+             AND fr.subject_code = f.subject_code 
+             AND fr.faculty_id = f.faculty_id
             LEFT JOIN faculty fac ON fr.faculty_id = fac.id
             WHERE f.department = ? AND f.year = ? AND f.semester = ?
-            GROUP BY f.id, f.subject_code, fac.name
+            GROUP BY f.department, f.year, f.semester, f.subject_code, fac.name
             ORDER BY f.subject_code";
         
         $stmt = $conn->prepare($subject_query);

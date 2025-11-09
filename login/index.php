@@ -68,6 +68,8 @@ session_start();
       const otpSection = document.getElementById('otpSection');
       const otpHint = document.getElementById('otpHint');
       const otpInputs = ['d1','d2','d3','d4','d5','d6'].map(id => document.getElementById(id));
+      const resendLink = document.getElementById('resendOtpLink');
+      const resendStatus = document.getElementById('resendStatus');
       
       otpInputs.forEach((input, idx) => {
         if (!input) return;
@@ -92,6 +94,40 @@ session_start();
         loginBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send OTP';
       }
       resetLoginButton();
+
+      if (resendLink) {
+        resendLink.addEventListener('click', async function(e) {
+          e.preventDefault();
+          if (resendLink.dataset.loading === '1') return;
+          successMessage.style.display = 'none';
+          errorMessage.style.display = 'none';
+          if (resendStatus) resendStatus.textContent = '';
+          resendLink.dataset.loading = '1';
+          const originalText = resendLink.textContent;
+          resendLink.textContent = 'Sending...';
+          resendLink.style.pointerEvents = 'none';
+          try {
+            const res = await fetch('../includes/resend_otp_ajax.php', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+              successText.textContent = data.message || 'A new OTP has been sent.';
+              successMessage.style.display = 'block';
+              if (data.email && otpHint) { otpHint.textContent = `OTP sent to ${data.email}.`; }
+              if (resendStatus) resendStatus.textContent = '';
+            } else {
+              errorText.textContent = data.message || 'Failed to resend OTP';
+              errorMessage.style.display = 'block';
+            }
+          } catch (err) {
+            errorText.textContent = 'Network error. Please try again.';
+            errorMessage.style.display = 'block';
+          } finally {
+            resendLink.dataset.loading = '0';
+            resendLink.textContent = originalText;
+            resendLink.style.pointerEvents = 'auto';
+          }
+        });
+      }
 
       form.addEventListener('submit', async function(e) {
         e.preventDefault();

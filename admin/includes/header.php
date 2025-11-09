@@ -1,12 +1,12 @@
+<?php if (!isset($page_title)) { $page_title = 'Admin - College Feedback Portal'; } ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Admin Dashboard - College Feedback Portal</title>
+  <title><?php echo htmlspecialchars($page_title); ?></title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     /* Basic Reset & Font Import */
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -52,6 +52,7 @@
       color: var(--muted) !important;
     }
   </style>
+  <?php if (!empty($extra_head)) { echo $extra_head; } ?>
 </head>
 <body>
   <script>
@@ -59,6 +60,7 @@
     document.addEventListener('DOMContentLoaded', function() {
       const themeToggle = document.getElementById('themeToggle');
       const html = document.documentElement;
+      const body = document.body;
       
       // Check for saved theme preference or use preferred color scheme
       const savedTheme = localStorage.getItem('theme') || 
@@ -67,6 +69,7 @@
       // Apply the saved theme
       if (savedTheme === 'dark') {
         html.classList.add('dark-theme');
+        body.classList.add('dark-theme');
         if (themeToggle) {
           themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
         }
@@ -78,7 +81,8 @@
       if (themeToggle) {
         themeToggle.addEventListener('click', () => {
           html.classList.toggle('dark-theme');
-          const isDark = html.classList.contains('dark-theme');
+          body.classList.toggle('dark-theme');
+          const isDark = html.classList.contains('dark-theme') || body.classList.contains('dark-theme');
           localStorage.setItem('theme', isDark ? 'dark' : 'light');
           themeToggle.innerHTML = isDark ? '<i class="fas fa-moon"></i>' : '<i class="fas fa-sun"></i>';
         });

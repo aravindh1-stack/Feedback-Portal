@@ -380,205 +380,510 @@ if (isset($_SESSION['bulk_errors'])) {
     $bulk_errors = $_SESSION['bulk_errors'];
     unset($_SESSION['bulk_errors']);
 }
-
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Users - Admin Dashboard</title>
-    
+    <title>Manage Users - Aarasys</title>
+
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzQzMzhDMyIvPgo8cGF0aCBkPSJNOCAxMkg5VjIwSDhWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTEgMTJIMTJWMjBIMTFWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTQgMTJIMTVWMjBIMTRWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
     <style>
+        /* === NEW DESIGN STYLES (Based on Image) === */
+
+        /* 1. CSS Variables (Theme) */
         :root {
-            --primary-50: #eff6ff; --primary-500: #3b82f6; --primary-600: #2563eb;
-            --success-100: #dcfce7; --success-500: #16a34a;
-            --danger-100: #fee2e2; --danger-500: #dc2626; --danger-600: #b91c1c;
-            --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-400: #9ca3af;
-            --gray-500: #6b7280; --gray-600: #4b5563; --gray-800: #1f2937; --gray-900: #111827;
-            --body-bg: var(--gray-50); --sidebar-bg: #ffffff; --card-bg: #ffffff; --header-bg: rgba(255, 255, 255, 0.85);
-            --border-color: var(--gray-200); --text-color: var(--gray-600); --heading-color: var(--gray-900);
-            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05); --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --radius-lg: 0.75rem; --radius-xl: 1rem;
-            --spacing-2: 0.5rem; --spacing-3: 0.75rem; --spacing-4: 1rem; --spacing-5: 1.25rem; --spacing-6: 1.5rem; --spacing-8: 2rem;
-            --font-size-sm: 0.875rem; --font-size-base: 1rem; --font-size-2xl: 1.5rem; --font-size-3xl: 2.25rem;
-            --transition-fast: all 0.2s ease-in-out; --transition-normal: all 0.3s ease-in-out;
-            --sidebar-width: 280px; --header-height: 80px;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', sans-serif; background-color: var(--body-bg); color: var(--text-color); line-height: 1.6; }
-        .admin-layout { display: flex; }
-        .main-content { margin-left: var(--sidebar-width); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
-        .content { flex: 1; padding: 3rem var(--spacing-8); }
-        .sidebar { width: var(--sidebar-width); background: var(--sidebar-bg); border-right: 1px solid var(--border-color); position: fixed; height: 100vh; display: flex; flex-direction: column; z-index: 1000; transition: var(--transition-normal); }
-        .sidebar-header { height: var(--header-height); padding: 0 var(--spacing-6); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; }
-        .sidebar-logo { display: flex; align-items: center; gap: var(--spacing-3); font-size: var(--font-size-lg); font-weight: 600; color: var(--heading-color); }
-        .sidebar-logo i { width: 40px; height: 40px; background: var(--primary-500); color: white; border-radius: var(--radius-lg); display: grid; place-items: center; font-size: 1.2rem; }
-        .sidebar-subtitle { font-size: var(--font-size-sm); color: var(--gray-500); font-weight: 500; }
-        .sidebar-nav { padding: var(--spacing-4) 0; flex-grow: 1; }
-        .nav-section-title { font-size: var(--font-size-sm); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--spacing-6) var(--spacing-3); color: var(--gray-400); }
-        .nav-item { display: flex; align-items: center; gap: var(--spacing-4); padding: var(--spacing-3) var(--spacing-6); color: var(--text-color); text-decoration: none; margin: var(--spacing-2) var(--spacing-4); border-radius: var(--radius-lg); font-weight: 500; transition: var(--transition-fast); }
-        .nav-item:hover { background: var(--primary-50); color: var(--primary-600); }
-        .nav-item.active { background-color: var(--primary-50); color: var(--primary-600); font-weight: 700; position: relative; }
-        .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 4px; height: 24px; background: var(--primary-500); border-radius: 0 4px 4px 0; }
-        .nav-item.danger:hover { background-color: var(--danger-100); color: var(--danger-600); }
-        .nav-item i { width: 20px; text-align: center; }
-        .header { height: var(--header-height); background: var(--header-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--spacing-8); position: sticky; top: 0; z-index: 999; }
-        .page-title { font-size: var(--font-size-2xl); font-weight: 700; color: var(--heading-color); }
-        .card { background: var(--card-bg); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); margin-bottom: 2rem; }
-        .card-header { padding: var(--spacing-5) var(--spacing-6); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;}
-        .card-title { font-size: var(--font-size-lg); font-weight: 600; color: var(--heading-color); }
-        .card-body { padding: var(--spacing-6); }
-        .search-and-actions { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-        .filter-controls { display: flex; gap: var(--spacing-3); align-items: center; flex-wrap: wrap;}
-        .search-wrapper { position: relative; }
-        .search-input, .filter-select { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--border-color); border-radius: var(--radius-lg); font-size: var(--font-size-sm); transition: var(--transition-fast); }
-        .search-input { padding-left: 2.5rem; }
-        .search-input:focus, .filter-select:focus { outline: none; border-color: var(--primary-500); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
-        .search-icon { position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); color: var(--gray-400); }
-        .btn { display: inline-flex; align-items: center; gap: var(--spacing-2); padding: 0.6rem 1.2rem; border-radius: var(--radius-lg); font-weight: 600; text-decoration: none; border: none; cursor: pointer; transition: var(--transition-fast); }
-        .btn-primary { background: var(--primary-500); color: white; }
-        .btn-primary:hover { background: var(--primary-600); }
-        .btn-danger { background: var(--danger-500); color: white; }
-        .btn-danger:hover { background: var(--danger-600); }
-        .btn-secondary { background: var(--gray-200); color: var(--gray-800); }
-        .btn-secondary:hover { background: var(--gray-300); }
-        .table-wrapper { overflow-x: auto; }
-        .user-table { width: 100%; border-collapse: collapse; }
-        .user-table th, .user-table td { padding: var(--spacing-3) var(--spacing-4); text-align: left; border-bottom: 1px solid var(--border-color); }
-        .user-table thead { background-color: var(--gray-50); }
-        .user-table th { font-size: var(--font-size-sm); font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em; }
-        .user-table tbody tr:hover { background-color: var(--gray-50); }
-        .action-buttons { display: flex; gap: var(--spacing-3); }
-        .action-btn { background: none; border: none; cursor: pointer; color: var(--gray-400); font-size: 1rem; }
-        .action-btn:hover { color: var(--primary-500); }
-        .action-btn.delete:hover { color: var(--danger-500); }
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--transition-fast); }
-        .modal-overlay.active { display: flex; opacity: 1; }
-        .modal-content { background: var(--card-bg); padding: var(--spacing-8); border-radius: var(--radius-xl); max-width: 500px; width: 90%; box-shadow: var(--shadow-lg); position: relative; transform: scale(0.95); transition: transform var(--transition-fast); }
-        .modal-overlay.active .modal-content { transform: scale(1); }
-        .modal-close { position: absolute; top: 1rem; right: 1rem; background: none; border: none; font-size: 1.5rem; color: var(--gray-400); cursor: pointer; }
-        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-4); }
-        .form-group { display: flex; flex-direction: column; }
-        .form-group label { margin-bottom: var(--spacing-2); font-weight: 500; }
-        .form-control { padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--border-color); border-radius: var(--radius-lg); }
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-6); margin-bottom: 2rem; }
-        .stat-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); padding: var(--spacing-6); display: flex; align-items: center; gap: var(--spacing-5); }
-        .stat-icon { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 1.5rem; flex-shrink: 0; }
-        .stat-icon.students { background: var(--primary-50); color: var(--primary-500); }
-        .stat-icon.faculty { background: var(--success-100); color: var(--success-500); }
-        .stat-value { font-size: var(--font-size-3xl); font-weight: 700; color: var(--heading-color); line-height: 1; }
-        .stat-label { font-size: var(--font-size-base); color: var(--text-color); }
-        .loader-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(5px); z-index: 9999; display: none; align-items: center; justify-content: center; }
-        .loader-spinner { border: 5px solid var(--gray-200); border-top: 5px solid var(--primary-500); border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        
-        /* Animations */
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .animated {
-            animation: fadeInUp 0.5s ease-out forwards;
-            opacity: 0;
+            /* Palette */
+            --primary-blue: #3b82f6; 
+            --primary-purple: #6366F1;
+            --dark-bg: #1f2937;
+            --light-bg: #f3f4f6;
+            --card-bg: #ffffff;
+            --border-color: #e5e7eb;
+            --text-dark: #111827;
+            --text-body: #4b5563;
+            --text-light: #f9fafb;
+            --text-muted: #9ca3af;
+            --text-blue: #2563eb;
+            --success-bg: #dcfce7;
+            --success-text: #16a34a;
+            --danger-bg: #fee2e2;
+            --danger-text: #dc2626;
+            --info-bg: #eff6ff;
+            --info-text: #2563eb;
+            
+            /* Sizing & Spacing */
+            --sidebar-width: 280px;
+            --header-height: 88px;
+            --radius-sm: 0.375rem; --radius-md: 0.5rem; --radius-lg: 0.75rem;
+            --radius-xl: 1rem; --radius-2xl: 1.5rem; --radius-full: 9999px;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
         }
 
+        /* 2. Base & Reset */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--light-bg);
+            color: var(--text-body);
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        a { text-decoration: none; color: inherit; }
+        button { font-family: inherit; }
+
+        /* 3. Main Layout */
+        .admin-layout { display: flex; }
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .content-area {
+            padding: 2rem 2.5rem;
+            flex: 1;
+        }
+
+        /* 4. Header (Topbar) */
+        .header {
+            height: var(--header-height);
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2.5rem;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+        .header-title {
+            font-size: 1.75rem; 
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+        .header-actions { display: flex; align-items: center; gap: 1rem; }
+        .search-wrapper { position: relative; }
+        .search-wrapper i {
+            position: absolute; left: 1rem; top: 50%;
+            transform: translateY(-50%); color: var(--text-muted);
+        }
+        .search-input {
+            padding: 0.75rem 1rem 0.75rem 2.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background-color: var(--light-bg);
+            font-size: 0.9rem;
+            width: 280px;
+            transition: all 0.2s ease;
+        }
+        .search-input:focus {
+            outline: none; border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            background-color: var(--card-bg);
+        }
+        .header-btn {
+            width: 44px; height: 44px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background-color: var(--card-bg);
+            display: grid; place-items: center;
+            font-size: 1.1rem; color: var(--text-body);
+            cursor: pointer; transition: all 0.2s ease;
+        }
+        .header-btn:hover { border-color: var(--primary-blue); color: var(--primary-blue); }
+        .user-avatar {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            background-color: var(--primary-purple);
+            color: var(--text-light);
+            display: grid; place-items: center;
+            font-weight: 600; font-size: 1.1rem;
+            border: 2px solid var(--card-bg);
+            box-shadow: 0 0 0 2px var(--primary-purple);
+            cursor: pointer;
+        }
+
+        /* 5. Buttons */
+        .btn {
+            display: inline-flex; align-items: center;
+            gap: 0.5rem; padding: 0.65rem 1rem;
+            border-radius: var(--radius-md);
+            font-weight: 600; text-decoration: none;
+            border: none; cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        .btn-primary { background-color: var(--primary-blue); color: var(--text-light); }
+        .btn-primary:hover { background-color: var(--text-blue); box-shadow: var(--shadow-md); }
+        .btn-secondary {
+            background-color: var(--card-bg);
+            color: var(--text-body);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+        }
+        .btn-secondary:hover { background-color: var(--light-bg); border-color: #d1d5db; }
+        .btn-danger { background-color: var(--danger-text); color: var(--text-light); }
+        .btn-danger:hover { background-color: #b91c1c; box-shadow: var(--shadow-md); }
+
+        /* 6. Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .tab-btn {
+            padding: 0.6rem 1.25rem;
+            border: 1px solid var(--border-color);
+            background: var(--card-bg);
+            color: var(--text-body);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        .tab-btn.active, .tab-btn:hover {
+            background: var(--card-bg);
+            color: var(--primary-blue);
+            border-color: var(--primary-blue);
+            box-shadow: var(--shadow-sm);
+        }
+        .tab-btn.active {
+             background: var(--info-bg);
+        }
+
+        /* 7. Card */
+        .grid-card {
+            background-color: var(--card-bg);
+            border-radius: var(--radius-xl);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 1.5rem;
+        }
+        .grid-card-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-dark);
+        }
+        .search-and-actions {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-select, .form-control {
+            padding: 0.65rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            background-color: var(--card-bg);
+            color: var(--text-body);
+            transition: all 0.2s ease;
+        }
+        .filter-select:focus, .form-control:focus {
+            outline: none;
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        .grid-card-header .search-wrapper {
+             flex-grow: 1;
+        }
+        .grid-card-header .search-input {
+            width: 100%;
+            min-width: 200px;
+        }
+        .grid-card-body {
+            padding: 0; /* Remove padding for full-width table */
+        }
+
+        /* 8. Table */
+        .table-wrapper { overflow-x: auto; }
+        .user-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        .user-table th, .user-table td {
+            padding: 0.85rem 1.5rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+        .user-table thead {
+            background-color: var(--light-bg);
+        }
+        .user-table th {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .user-table tbody tr:hover {
+            background-color: var(--light-bg);
+        }
+        .user-table td .badge {
+            font-weight: 500;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: var(--radius-full);
+            font-size: 0.8rem;
+            font-weight: 500;
+            background: var(--light-bg);
+            color: var(--text-body);
+            border: 1px solid var(--border-color);
+        }
+        .action-buttons { display: flex; gap: 0.5rem; }
+        .action-btn {
+            width: 32px; height: 32px;
+            border-radius: var(--radius-md);
+            display: grid;
+            place-items: center;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        .action-btn:hover {
+            background-color: var(--info-bg);
+            color: var(--info-text);
+        }
+        .action-btn.delete:hover {
+            background-color: var(--danger-bg);
+            color: var(--danger-text);
+        }
+        
+        /* 9. Modals */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(17, 24, 39, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 1001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+        .modal-content {
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: var(--radius-xl);
+            max-width: 600px;
+            width: 90%;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            transform: scale(0.95) translateY(10px);
+            transition: all 0.2s ease-out;
+        }
+        .modal-overlay.active .modal-content {
+            transform: scale(1) translateY(0);
+        }
+        .modal-close {
+            position: absolute; top: 0.75rem; right: 0.75rem;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: none; border: none;
+            font-size: 1.5rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: grid; place-items: center;
+            transition: all 0.2s ease;
+        }
+        .modal-close:hover {
+            background-color: var(--light-bg);
+            color: var(--text-dark);
+        }
+        .modal-content h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 1.5rem;
+        }
+        
+        /* 10. Forms in Modals */
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.25rem;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+        .form-group label {
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--text-dark);
+        }
+        .form-control[type="file"] {
+            padding: 0.5rem 0.75rem;
+        }
+
+        /* 11. Bulk Upload & Info Boxes */
+        .info-box {
+            padding: 1rem;
+            border-radius: var(--radius-lg);
+            margin-bottom: 1.5rem;
+            background: var(--info-bg);
+            border: 1px solid var(--primary-blue);
+        }
+        .info-box h3, .info-box h4 {
+            color: var(--info-text);
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+        .info-box p, .info-box li {
+            font-size: 0.9rem;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+        .info-box code {
+            background: rgba(255,255,255,0.7);
+            padding: 0.25rem 0.5rem;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            color: #4b5563;
+        }
+        .info-box.success {
+             background: var(--success-bg);
+             border-color: var(--success-text);
+        }
+        .info-box.success h4 { color: #15803d; }
+        .info-box.success p { color: #166534; }
+        
+        /* 12. Loader */
+        .loader-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(5px);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .loader-spinner {
+            border: 5px solid var(--border-color);
+            border-top: 5px solid var(--primary-blue);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* 13. Responsive */
+        @media (max-width: 1200px) {
+            .grid-card-header { flex-direction: column; align-items: stretch; }
+            .search-and-actions { width: 100%; }
+        }
         @media (max-width: 768px) {
             .main-content { margin-left: 0; }
-            .sidebar { transform: translateX(-100%); }
-            .sidebar.active { transform: translateX(0); }
-            .content { padding: 2rem 1rem; }
+            .sidebar { display: none; /* Add JS to toggle */ }
+            .content-area { padding: 1.5rem 1rem; }
             .header { padding: 0 1rem; }
-            .search-and-actions { flex-direction: column; align-items: stretch; }
+            .header-title { display: none; }
+            .header .search-wrapper { display: none; }
             .form-grid { grid-template-columns: 1fr; }
-            .stats-grid { grid-template-columns: 1fr; }
         }
+
     </style>
 </head>
 <body>
+    
     <div id="loadingOverlay" class="loader-overlay">
         <div class="loader-spinner"></div>
     </div>
+
     <div class="admin-layout">
-        <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <a href="dashboard.php" style="text-decoration: none;">
-                    <div class="sidebar-logo">
-                        <i class="fas fa-graduation-cap"></i>
-                        <div>
-                            <div>College Feedback</div>
-                            <div class="sidebar-subtitle">Admin Panel</div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="nav-section">
-                    <div class="nav-section-title">Main</div>
-                    <a href="dashboard.php" class="nav-item"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-                    <a href="#" class="nav-item"><i class="fas fa-chart-bar"></i> Analytics</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">Management</div>
-                    <a href="manage_users.php" class="nav-item active"><i class="fas fa-users"></i> Users</a>
-                    <a href="manage_forms.php" class="nav-item"><i class="fas fa-file-alt"></i> Manage Forms</a>
-                    <a href="view_feedback.php" class="nav-item"><i class="fas fa-comments"></i> View Feedback</a>
-                    <a href="student_feedback_list.php" class="nav-item"><i class="fas fa-user-graduate"></i> Student Data</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">System</div>
-                    <a href="#" class="nav-item"><i class="fas fa-cog"></i> Settings</a>
-                    <a href="../includes/logout.php" class="nav-item danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                </div>
-            </div>
-        </nav>
+        
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
-        <!-- Main Content -->
         <main class="main-content">
+            
             <header class="header">
-                 <div>
-                    <h1 class="page-title">User Management</h1>
-                 </div>
-            </header>
-
-            <div class="content">
-                <!-- Statistics Cards -->
-                <div class="stats-grid">
-                    <div class="stat-card animated" style="animation-delay: 0.1s;">
-                        <div class="stat-icon students">
-                            <i class="fas fa-user-graduate"></i>
-                        </div>
-                        <div class="stat-info">
-                            <div class="stat-value" data-count="<?php echo $student_count; ?>">0</div>
-                            <div class="stat-label">Total Students</div>
-                        </div>
+                <h1 class="header-title">Manage Users</h1>
+                
+                <div class="header-actions">
+                    <div class="search-wrapper">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="globalSearch" class="search-input" placeholder="Search users...">
                     </div>
-                    <div class="stat-card animated" style="animation-delay: 0.2s;">
-                        <div class="stat-icon faculty">
-                            <i class="fas fa-chalkboard-teacher"></i>
-                        </div>
-                        <div class="stat-info">
-                            <div class="stat-value" data-count="<?php echo $faculty_count; ?>">0</div>
-                            <div class="stat-label">Total Faculty</div>
-                        </div>
+                    
+                    <button class="header-btn" title="Toggle Theme">
+                        <i class="fas fa-sun"></i>
+                    </button>
+                    <button class="header-btn" title="Notifications">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    
+                    <div class="user-avatar" title="Admin">
+                        AD
                     </div>
                 </div>
+            </header>
+            
+            <div class="content-area">
+                
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="students">
+                        <i class="fas fa-user-graduate"></i> Students (<?php echo $student_count; ?>)
+                    </button>
+                    <button class="tab-btn" data-tab="faculty">
+                        <i class="fas fa-user-tie"></i> Faculty (<?php echo $faculty_count; ?>)
+                    </button>
+                </div>
 
-                <!-- Students Table Card -->
-                <div class="card animated" style="animation-delay: 0.3s;">
-                    <div class="card-header">
-                        <h2 class="card-title">Students List</h2>
-                        <div class="search-and-actions">
+                <section id="students-section">
+                    <div class="grid-card">
+                        <div class="grid-card-header">
                             <div class="filter-controls">
                                 <select id="studentDeptFilter" class="filter-select" onchange="filterStudentTable()">
                                     <option value="">All Departments</option>
@@ -595,59 +900,60 @@ if (isset($_SESSION['bulk_errors'])) {
                                 </select>
                                 <select id="studentSemFilter" class="filter-select" onchange="filterStudentTable()">
                                     <option value="">All Semesters</option>
-                                     <?php for ($i = 1; $i <= 8; $i++): ?>
+                                    <?php for ($i = 1; $i <= 8; $i++): ?>
                                         <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
                                     <?php endfor; ?>
                                 </select>
                             </div>
-                            <div class="search-wrapper">
-                                <i class="fas fa-search search-icon"></i>
-                                <input type="text" class="search-input" id="studentSearch" onkeyup="filterStudentTable()" placeholder="Search students...">
+                            <div class="search-and-actions">
+                                <div class="search-wrapper">
+                                    <i class="fas fa-search search-icon"></i>
+                                    <input type="text" class="search-input" id="studentSearch" onkeyup="filterStudentTable()" placeholder="Search by name or SIN...">
+                                </div>
+                                <button class="btn btn-secondary" onclick="openModal('bulkUploadModal')"><i class="fas fa-upload"></i> Bulk Upload</button>
+                                <button class="btn btn-primary" onclick="openModal('addStudentModal')"><i class="fas fa-plus"></i> Add Student</button>
                             </div>
-                            <button class="btn btn-primary" onclick="openModal('addStudentModal')"><i class="fas fa-plus"></i> Add Student</button>
-                            <button class="btn btn-secondary" onclick="openModal('bulkUploadModal')"><i class="fas fa-upload"></i> Bulk Upload</button>
+                        </div>
+                        <div class="grid-card-body">
+                            <div class="table-wrapper">
+                                <table class="user-table" id="studentTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>SIN Number</th>
+                                            <th>Email</th>
+                                            <th>Department</th>
+                                            <th>Year</th>
+                                            <th>Semester</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php $students_result->data_seek(0); // Reset pointer ?>
+                                        <?php while($row = $students_result->fetch_assoc()): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($row['name']); ?></td>
+                                            <td><?php echo htmlspecialchars($row['sin_number']); ?></td>
+                                            <td><?php echo htmlspecialchars($row['email'] ?? 'N/A'); ?></td>
+                                            <td><span class="badge"><?php echo htmlspecialchars($row['department']); ?></span></td>
+                                            <td><span class="badge"><?php echo htmlspecialchars($row['year']); ?></span></td>
+                                            <td><span class="badge"><?php echo htmlspecialchars($row['semester']); ?></span></td>
+                                            <td class="action-buttons">
+                                                <button class="action-btn" title="Edit" onclick='openEditStudentModal(<?php echo json_encode($row); ?>)'><i class="fas fa-pencil-alt"></i></button>
+                                                <button class="action-btn delete" title="Delete" onclick="openDeleteConfirmationModal(<?php echo $row['id']; ?>, 'student')"><i class="fas fa-trash"></i></button>
+                                            </td>
+                                        </tr>
+                                        <?php endwhile; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div class="table-wrapper">
-                            <table class="user-table" id="studentTable">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>SIN Number</th>
-                                        <th>Email</th>
-                                        <th>Department</th>
-                                        <th>Year</th>
-                                        <th>Semester</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php while($row = $students_result->fetch_assoc()): ?>
-                                    <tr>
-                                        <td><?php echo htmlspecialchars($row['name']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['sin_number']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['email'] ?? 'Not provided'); ?></td>
-                                        <td><?php echo htmlspecialchars($row['department']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['year']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['semester']); ?></td>
-                                        <td class="action-buttons">
-                                            <button class="action-btn" title="Edit" onclick='openEditStudentModal(<?php echo json_encode($row); ?>)'><i class="fas fa-pencil-alt"></i></button>
-                                            <button class="action-btn delete" title="Delete" onclick="openDeleteConfirmationModal(<?php echo $row['id']; ?>, 'student')"><i class="fas fa-trash"></i></button>
-                                        </td>
-                                    </tr>
-                                    <?php endwhile; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
+                </section>
 
-                <!-- Faculty Table Card -->
-                <div class="card animated" style="animation-delay: 0.4s;">
-                    <div class="card-header">
-                        <h2 class="card-title">Faculty List</h2>
-                        <div class="search-and-actions">
+                <section id="faculty-section" style="display:none;">
+                    <div class="grid-card">
+                        <div class="grid-card-header">
                              <div class="filter-controls">
                                 <select id="facultyDeptFilter" class="filter-select" onchange="filterFacultyTable()">
                                     <option value="">All Departments</option>
@@ -656,47 +962,46 @@ if (isset($_SESSION['bulk_errors'])) {
                                     <?php endforeach; ?>
                                 </select>
                             </div>
-                            <div class="search-wrapper">
-                                <i class="fas fa-search search-icon"></i>
-                                <input type="text" class="search-input" id="facultySearch" onkeyup="filterFacultyTable()" placeholder="Search for faculty...">
+                            <div class="search-and-actions">
+                                <div class="search-wrapper">
+                                    <i class="fas fa-search search-icon"></i>
+                                    <input type="text" class="search-input" id="facultySearch" onkeyup="filterFacultyTable()" placeholder="Search by name or email...">
+                                </div>
+                                <button class="btn btn-primary" onclick="openModal('addFacultyModal')"><i class="fas fa-plus"></i> Add Faculty</button>
                             </div>
-                            <button class="btn btn-primary" onclick="openModal('addFacultyModal')"><i class="fas fa-plus"></i> Add Faculty</button>
+                        </div>
+                        <div class="grid-card-body">
+                            <div class="table-wrapper">
+                                <table class="user-table" id="facultyTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Department</th>
+                                            <th>Email</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php $faculty_result->data_seek(0); // Reset pointer ?>
+                                        <?php while($row = $faculty_result->fetch_assoc()): ?>
+                                        <tr>
+                                            <td><?php echo htmlspecialchars($row['name']); ?></td>
+                                            <td><span class="badge"><?php echo htmlspecialchars($row['department']); ?></span></td>
+                                            <td><?php echo htmlspecialchars($row['email']); ?></td>
+                                            <td class="action-buttons">
+                                                <button class="action-btn" title="Edit" onclick='openEditFacultyModal(<?php echo json_encode($row); ?>)'><i class="fas fa-pencil-alt"></i></button>
+                                                <button class="action-btn delete" title="Delete" onclick="openDeleteConfirmationModal(<?php echo $row['id']; ?>, 'faculty')"><i class="fas fa-trash"></i></button>
+                                            </td>
+                                        </tr>
+                                        <?php endwhile; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div class="table-wrapper">
-                            <table class="user-table" id="facultyTable">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Department</th>
-                                        <th>Email</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php while($row = $faculty_result->fetch_assoc()): ?>
-                                    <tr>
-                                        <td><?php echo htmlspecialchars($row['name']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['department']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['email']); ?></td>
-                                        <td class="action-buttons">
-                                            <button class="action-btn" title="Edit" onclick='openEditFacultyModal(<?php echo json_encode($row); ?>)'><i class="fas fa-pencil-alt"></i></button>
-                                            <button class="action-btn delete" title="Delete" onclick="openDeleteConfirmationModal(<?php echo $row['id']; ?>, 'faculty')"><i class="fas fa-trash"></i></button>
-                                        </td>
-                                    </tr>
-                                    <?php endwhile; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- Add Student Modal -->
-    <div id="addStudentModal" class="modal-overlay">
+                </section>
+                
+            </div> </main> </div> <div id="addStudentModal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close" onclick="closeModal('addStudentModal')">&times;</button>
             <h2>Add New Student</h2>
@@ -704,7 +1009,7 @@ if (isset($_SESSION['bulk_errors'])) {
                 <div class="form-grid">
                     <div class="form-group"><label for="s_name">Name</label><input id="s_name" type="text" name="name" class="form-control" required></div>
                     <div class="form-group"><label for="s_sin">SIN Number</label><input id="s_sin" type="text" name="sin_number" class="form-control" required></div>
-                    <div class="form-group"><label for="s_email">Email</label><input id="s_email" type="email" name="email" class="form-control" placeholder="student@example.com"></div>
+                    <div class="form-group full-width"><label for="s_email">Email</label><input id="s_email" type="email" name="email" class="form-control" placeholder="student@example.com"></div>
                     <div class="form-group">
                         <label for="s_dept">Department</label>
                         <select id="s_dept" name="department" class="form-control" required>
@@ -718,29 +1023,23 @@ if (isset($_SESSION['bulk_errors'])) {
                         <label for="s_year">Year</label>
                         <select id="s_year" name="year" class="form-control" required>
                             <option value="">Select Year</option>
-                            <option value="1">1st Year</option>
-                            <option value="2">2nd Year</option>
-                            <option value="3">3rd Year</option>
-                            <option value="4">4th Year</option>
+                            <option value="1">1st Year</option><option value="2">2nd Year</option><option value="3">3rd Year</option><option value="4">4th Year</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label for="s_sem">Semester</label>
                         <select id="s_sem" name="semester" class="form-control" required>
                             <option value="">Select Semester</option>
-                            <?php for ($i = 1; $i <= 8; $i++): ?>
-                                <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
-                            <?php endfor; ?>
+                            <?php for ($i = 1; $i <= 8; $i++): ?><option value="<?php echo $i; ?>"><?php echo $i; ?></option><?php endfor; ?>
                         </select>
                     </div>
                     <div class="form-group"><label for="s_pass">Password</label><input id="s_pass" type="password" name="password" class="form-control" required></div>
                 </div>
-                <button type="submit" name="add_student" class="btn btn-primary" style="margin-top: 1rem;">Add Student</button>
+                <button type="submit" name="add_student" class="btn btn-primary" style="margin-top: 1.5rem;">Add Student</button>
             </form>
         </div>
     </div>
 
-    <!-- Edit Student Modal -->
     <div id="editStudentModal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close" onclick="closeModal('editStudentModal')">&times;</button>
@@ -750,7 +1049,7 @@ if (isset($_SESSION['bulk_errors'])) {
                 <div class="form-grid">
                     <div class="form-group"><label for="edit_s_name">Name</label><input id="edit_s_name" type="text" name="name" class="form-control" required></div>
                     <div class="form-group"><label for="edit_s_sin">SIN Number</label><input id="edit_s_sin" type="text" name="sin_number" class="form-control" required></div>
-                    <div class="form-group"><label for="edit_s_email">Email</label><input id="edit_s_email" type="email" name="email" class="form-control" placeholder="student@example.com"></div>
+                    <div class="form-group full-width"><label for="edit_s_email">Email</label><input id="edit_s_email" type="email" name="email" class="form-control" placeholder="student@example.com"></div>
                     <div class="form-group">
                         <label for="edit_s_dept">Department</label>
                         <select id="edit_s_dept" name="department" class="form-control" required>
@@ -763,28 +1062,22 @@ if (isset($_SESSION['bulk_errors'])) {
                     <div class="form-group">
                         <label for="edit_s_year">Year</label>
                         <select id="edit_s_year" name="year" class="form-control" required>
-                            <option value="1">1st Year</option>
-                            <option value="2">2nd Year</option>
-                            <option value="3">3rd Year</option>
-                            <option value="4">4th Year</option>
+                            <option value="1">1st Year</option><option value="2">2nd Year</option><option value="3">3rd Year</option><option value="4">4th Year</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label for="edit_s_sem">Semester</label>
                         <select id="edit_s_sem" name="semester" class="form-control" required>
-                             <?php for ($i = 1; $i <= 8; $i++): ?>
-                                <option value="<?php echo $i; ?>"><?php echo $i; ?></option>
-                            <?php endfor; ?>
+                             <?php for ($i = 1; $i <= 8; $i++): ?><option value="<?php echo $i; ?>"><?php echo $i; ?></option><?php endfor; ?>
                         </select>
                     </div>
                 </div>
-                <p style="font-size: var(--font-size-sm); color: var(--gray-500); margin-top: 1rem;">Password cannot be changed from this panel.</p>
-                <button type="submit" name="edit_student" class="btn btn-primary" style="margin-top: 1rem;">Save Changes</button>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 1.5rem;">Password cannot be changed from this panel.</p>
+                <button type="submit" name="edit_student" class="btn btn-primary" style="margin-top: 0.5rem;">Save Changes</button>
             </form>
         </div>
     </div>
 
-    <!-- Add Faculty Modal -->
     <div id="addFacultyModal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close" onclick="closeModal('addFacultyModal')">&times;</button>
@@ -804,12 +1097,11 @@ if (isset($_SESSION['bulk_errors'])) {
                     <div class="form-group"><label for="f_email">Email</label><input id="f_email" type="email" name="email" class="form-control" required></div>
                     <div class="form-group"><label for="f_pass">Password</label><input id="f_pass" type="password" name="password" class="form-control" required></div>
                 </div>
-                <button type="submit" name="add_faculty" class="btn btn-primary" style="margin-top: 1rem;">Add Faculty</button>
+                <button type="submit" name="add_faculty" class="btn btn-primary" style="margin-top: 1.5rem;">Add Faculty</button>
             </form>
         </div>
     </div>
     
-    <!-- Edit Faculty Modal -->
     <div id="editFacultyModal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close" onclick="closeModal('editFacultyModal')">&times;</button>
@@ -818,43 +1110,38 @@ if (isset($_SESSION['bulk_errors'])) {
                 <input type="hidden" id="edit_faculty_id" name="faculty_id">
                 <div class="form-grid">
                     <div class="form-group"><label for="edit_f_name">Name</label><input id="edit_f_name" type="text" name="name" class="form-control" required></div>
-                     <div class="form-group">
+                    <div class="form-group">
                         <label for="edit_f_dept">Department</label>
                         <select id="edit_f_dept" name="department" class="form-control" required>
                             <option value="">Select Department</option>
-                             <?php foreach ($departments as $dept): ?>
+                           <?php foreach ($departments as $dept): ?>
                                 <option value="<?php echo htmlspecialchars($dept); ?>"><?php echo htmlspecialchars($dept); ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="form-group" style="grid-column: 1 / -1;"><label for="edit_f_email">Email</label><input id="edit_f_email" type="email" name="email" class="form-control" required></div>
+                    <div class="form-group full-width"><label for="edit_f_email">Email</label><input id="edit_f_email" type="email" name="email" class="form-control" required></div>
                 </div>
-                 <p style="font-size: var(--font-size-sm); color: var(--gray-500); margin-top: 1rem;">Password cannot be changed from this panel.</p>
-                <button type="submit" name="edit_faculty" class="btn btn-primary" style="margin-top: 1rem;">Save Changes</button>
+                 <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 1.5rem;">Password cannot be changed from this panel.</p>
+                <button type="submit" name="edit_faculty" class="btn btn-primary" style="margin-top: 0.5rem;">Save Changes</button>
             </form>
         </div>
     </div>
     
-    <!-- Bulk Upload Modal -->
     <div id="bulkUploadModal" class="modal-overlay">
         <div class="modal-content">
             <button class="modal-close" onclick="closeModal('bulkUploadModal')">&times;</button>
             <h2>Bulk Upload Students</h2>
-            <div style="background: var(--primary-50); padding: 1rem; border-radius: var(--radius-lg); margin-bottom: 1.5rem;">
-                <h3 style="color: var(--primary-600); margin-bottom: 0.5rem;"><i class="fas fa-info-circle"></i> File Format Requirements</h3>
-                <p style="font-size: var(--font-size-sm); color: var(--gray-600); margin-bottom: 0.5rem;">Your CSV or Excel file should have the following columns in this exact order:</p>
-                <code style="background: white; padding: 0.5rem; border-radius: 4px; display: block; font-size: var(--font-size-sm);">
-                    Name, SIN Number, Email, Department, Year, Semester
-                </code>
-                <p style="font-size: var(--font-size-sm); color: var(--gray-600); margin-top: 0.5rem; margin-bottom: 0;">
-                    <strong>Supported formats:</strong> CSV (.csv), Excel (.xls, .xlsx)<br>
-                    <strong>Note:</strong> Default password will be set to 'student123' for all uploaded students.
-                </p>
-            </div>
             
-            <div style="background: var(--success-100); padding: 1rem; border-radius: var(--radius-lg); margin-bottom: 1.5rem;">
-                <h4 style="color: var(--success-600); margin-bottom: 0.5rem;"><i class="fas fa-download"></i> Download Sample Files</h4>
-                <p style="font-size: var(--font-size-sm); color: var(--gray-600); margin-bottom: 0.5rem;">Download sample files to see the correct format:</p>
+            <div class="info-box">
+                <h3><i class="fas fa-info-circle"></i> File Format Requirements</h3>
+                <p>Your file must have the following columns in this exact order. The first row should be the header.</p>
+                <code>Name, SIN Number, Email, Department, Year, Semester</code>
+                <p style="margin-top: 0.5rem; margin-bottom: 0;"><strong>Note:</strong> Default password will be set to 'student123' for all new students.</p>
+            </div>
+
+            <div class="info-box success">
+                <h4><i class="fas fa-download"></i> Download Sample Files</h4>
+                <p>Use these samples to ensure your format is correct.</p>
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                     <button type="button" class="btn btn-secondary" onclick="downloadSampleCSV()">
                         <i class="fas fa-file-csv"></i> CSV Sample
@@ -867,11 +1154,8 @@ if (isset($_SESSION['bulk_errors'])) {
             
             <form method="POST" enctype="multipart/form-data" onsubmit="showLoader()">
                 <div class="form-group">
-                    <label for="csv_file">Select File (CSV or Excel)</label>
+                    <label for="csv_file">Select File to Upload</label>
                     <input type="file" id="csv_file" name="csv_file" accept=".csv,.xls,.xlsx" class="form-control" required>
-                    <small style="color: var(--gray-500); font-size: var(--font-size-sm); margin-top: 0.25rem; display: block;">
-                        Supported formats: CSV (.csv), Excel (.xls, .xlsx)
-                    </small>
                 </div>
                 <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('bulkUploadModal')">Cancel</button>
@@ -883,25 +1167,25 @@ if (isset($_SESSION['bulk_errors'])) {
         </div>
     </div>
     
-    <!-- Delete Confirmation Modal -->
     <div id="deleteConfirmationModal" class="modal-overlay">
-        <div class="modal-content" style="text-align: center; max-width: 400px;">
-            <div id="messageIcon" style="font-size: 3rem; margin-bottom: 1rem; color: var(--danger-500);"><i class="fas fa-exclamation-triangle"></i></div>
-            <h2 style="margin-bottom: 1rem;">Are you sure?</h2>
-            <p id="deleteConfirmationText" style="margin-bottom: 1.5rem;">This action cannot be undone.</p>
+        <div class="modal-content" style="text-align: center; max-width: 420px;">
+            <div style="font-size: 3rem; margin-bottom: 1rem; color: var(--danger-text);"><i class="fas fa-exclamation-triangle"></i></div>
+            <h2 style="margin-bottom: 0.5rem;">Are you sure?</h2>
+            <p id="deleteConfirmationText" style="margin-bottom: 1.5rem; font-size: 1rem;">This action cannot be undone.</p>
             <form id="deleteForm" method="POST" onsubmit="showLoader()">
                 <input type="hidden" id="delete_id" name="">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmationModal')">Cancel</button>
-                <button type="submit" id="delete_submit_button" name="" class="btn btn-danger">Yes, Delete</button>
+                <div style="display: flex; gap: 0.75rem; justify-content: center;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('deleteConfirmationModal')">Cancel</button>
+                    <button type="submit" id="delete_submit_button" name="" class="btn btn-danger">Yes, Delete</button>
+                </div>
             </form>
         </div>
     </div>
 
-    <!-- Success/Error Modal -->
     <div id="messageModal" class="modal-overlay">
-        <div class="modal-content" style="text-align: center;">
+        <div class="modal-content" style="text-align: center; max-width: 450px;">
             <div id="messageIcon" style="font-size: 3rem; margin-bottom: 1rem;"></div>
-            <h2 id="messageText" style="margin-bottom: 1.5rem;"></h2>
+            <h2 id="messageText" style="margin-bottom: 1.5rem; font-size: 1.1rem; line-height: 1.6;"></h2>
             <button class="btn btn-primary" onclick="closeModal('messageModal')">Close</button>
         </div>
     </div>
@@ -913,11 +1197,11 @@ if (isset($_SESSION['bulk_errors'])) {
 
         function openModal(modalId) { 
             const modal = document.getElementById(modalId);
-            modal.classList.add('active');
+            if(modal) modal.classList.add('active');
         }
         function closeModal(modalId) { 
             const modal = document.getElementById(modalId);
-            modal.classList.remove('active');
+            if(modal) modal.classList.remove('active');
         }
 
         function openEditStudentModal(studentData) {
@@ -957,28 +1241,32 @@ if (isset($_SESSION['bulk_errors'])) {
         }
         
         function showMessageModal(message, type) {
-            const icon = document.getElementById('messageIcon');
-            const text = document.getElementById('messageText');
+            const modal = document.getElementById('messageModal');
+            const icon = modal.querySelector('#messageIcon');
+            const text = modal.querySelector('#messageText');
             if (type === 'success') {
-                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-500);"></i>';
+                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-text);"></i>';
             } else {
-                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-500);"></i>';
+                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-text);"></i>';
             }
-            text.textContent = message;
+            text.innerHTML = message.replace(/\n/g, '<br>'); // Use innerHTML for <br>
+            text.style.textAlign = 'center';
+            text.style.fontSize = '1.1rem';
             openModal('messageModal');
         }
         
         function showBulkUploadModal(message, type) {
-            const icon = document.getElementById('messageIcon');
-            const text = document.getElementById('messageText');
+            const modal = document.getElementById('messageModal');
+            const icon = modal.querySelector('#messageIcon');
+            const text = modal.querySelector('#messageText');
             if (type === 'success') {
-                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-500);"></i>';
+                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-text);"></i>';
             } else {
-                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-500);"></i>';
+                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-text);"></i>';
             }
             text.innerHTML = message.replace(/\n/g, '<br>');
-            text.style.textAlign = 'left';
-            text.style.fontSize = 'var(--font-size-sm)';
+            text.style.textAlign = 'left'; // Align left for lists
+            text.style.fontSize = '0.9rem'; // Smaller for details
             openModal('messageModal');
         }
 
@@ -990,7 +1278,7 @@ if (isset($_SESSION['bulk_errors'])) {
             const table = document.getElementById('studentTable');
             const tr = table.getElementsByTagName("tr");
 
-            for (let i = 1; i < tr.length; i++) {
+            for (let i = 1; i < tr.length; i++) { // Start from 1 to skip header
                 let nameTd = tr[i].getElementsByTagName("td")[0];
                 let sinTd = tr[i].getElementsByTagName("td")[1];
                 let deptTd = tr[i].getElementsByTagName("td")[3];
@@ -1001,8 +1289,8 @@ if (isset($_SESSION['bulk_errors'])) {
                     let nameMatch = nameTd.textContent.toUpperCase().indexOf(searchFilter) > -1;
                     let sinMatch = sinTd.textContent.toUpperCase().indexOf(searchFilter) > -1;
                     let deptMatch = deptFilter === '' || deptTd.textContent.toUpperCase() === deptFilter;
-                    let yearMatch = yearFilter === '' || yearTd.textContent === yearFilter;
-                    let semMatch = semFilter === '' || semTd.textContent === semFilter;
+                    let yearMatch = yearFilter === '' || yearTd.textContent.includes(yearFilter);
+                    let semMatch = semFilter === '' || semTd.textContent.includes(semFilter);
 
                     if ((nameMatch || sinMatch) && deptMatch && yearMatch && semMatch) {
                         tr[i].style.display = "";
@@ -1044,11 +1332,12 @@ if (isset($_SESSION['bulk_errors'])) {
         }
         
         document.addEventListener('DOMContentLoaded', function() {
+            // Show session message if it exists
             <?php if (!empty($message)): ?>
                 <?php if (!empty($bulk_errors)): ?>
-                    let errorDetails = "<?php echo addslashes($message); ?>\\n\\nError Details:\\n";
+                    let errorDetails = "<?php echo addslashes($message); ?>\n\nError Details:\n";
                     <?php foreach($bulk_errors as $error): ?>
-                        errorDetails += "• <?php echo addslashes($error); ?>\\n";
+                        errorDetails += "• <?php echo addslashes($error); ?>\n";
                     <?php endforeach; ?>
                     showBulkUploadModal(errorDetails, '<?php echo $message_type; ?>');
                 <?php else: ?>
@@ -1056,29 +1345,63 @@ if (isset($_SESSION['bulk_errors'])) {
                 <?php endif; ?>
             <?php endif; ?>
 
-            document.querySelectorAll('[data-count]').forEach(counter => {
-                const target = parseInt(counter.getAttribute('data-count'));
-                let current = 0;
-                const step = (target / 1000) * 16;
-                const update = () => {
-                    if (current < target) {
-                        current = Math.min(current + step, target);
-                        counter.textContent = Math.ceil(current).toLocaleString();
-                        requestAnimationFrame(update);
-                    } else {
-                        counter.textContent = target.toLocaleString();
-                    }
-                };
-                update();
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', function(){
+                    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+                    this.classList.add('active');
+                    var tab = this.getAttribute('data-tab');
+                    document.getElementById('students-section').style.display = tab === 'students' ? 'block' : 'none';
+                    document.getElementById('faculty-section').style.display = tab === 'faculty' ? 'block' : 'none';
+                    
+                    // Clear search fields when switching tabs
+                    document.getElementById('studentSearch').value = '';
+                    document.getElementById('facultySearch').value = '';
+                    document.getElementById('globalSearch').value = '';
+                    filterStudentTable();
+                    filterFacultyTable();
+                });
             });
+
+            // Global search in topbar -> routes to active tab input
+            const globalSearch = document.getElementById('globalSearch');
+            if (globalSearch) {
+                globalSearch.addEventListener('input', function(){
+                    const value = this.value;
+                    const activeTab = document.querySelector('.tab-btn.active')?.getAttribute('data-tab') || 'students';
+                    if (activeTab === 'students') {
+                        const input = document.getElementById('studentSearch');
+                        if (input) { input.value = value; }
+                        if (typeof filterStudentTable === 'function') filterStudentTable();
+                    } else {
+                        const input = document.getElementById('facultySearch');
+                        if (input) { input.value = value; }
+                        if (typeof filterFacultyTable === 'function') filterFacultyTable();
+                    }
+                });
+            }
+
+            // Theme Toggle
+            const themeToggleBtn = document.querySelector('.header-btn[title="Toggle Theme"]');
+            if(themeToggleBtn) {
+                themeToggleBtn.addEventListener('click', () => {
+                    document.body.classList.toggle('dark-theme');
+                    const icon = themeToggleBtn.querySelector('i');
+                    if (document.body.classList.contains('dark-theme')) {
+                        icon.classList.remove('fa-sun'); icon.classList.add('fa-moon');
+                    } else {
+                        icon.classList.remove('fa-moon'); icon.classList.add('fa-sun');
+                    }
+                });
+            }
         });
-        
+
         // Function to download sample CSV
         function downloadSampleCSV() {
             const csvContent = "Name,SIN Number,Email,Department,Year,Semester\n" +
-                               "John Doe,E24CS001,john.doe@example.com,CSE,2,3\n" +
-                               "Jane Smith,E24EC002,jane.smith@example.com,ECE,1,2\n" +
-                               "Mike Johnson,E24ME003,mike.johnson@example.com,MECH,3,5";
+                             "John Doe,E24CS001,john.doe@example.com,CSE,2,3\n" +
+                             "Jane Smith,E24EC002,jane.smith@example.com,ECE,1,2\n" +
+                             "Mike Johnson,E24ME003,mike.johnson@example.com,MECH,3,5";
             
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
@@ -1096,42 +1419,24 @@ if (isset($_SESSION['bulk_errors'])) {
             // Create a simple HTML table that Excel can open
             const htmlContent = `
                 <html>
-                <head>
-                    <meta charset="utf-8">
-                </head>
+                <head><meta charset="utf-8"></head>
                 <body>
                     <table>
                         <tr>
-                            <td>Name</td>
-                            <td>SIN Number</td>
-                            <td>Email</td>
-                            <td>Department</td>
-                            <td>Year</td>
-                            <td>Semester</td>
+                            <td>Name</td><td>SIN Number</td><td>Email</td>
+                            <td>Department</td><td>Year</td><td>Semester</td>
                         </tr>
                         <tr>
-                            <td>John Doe</td>
-                            <td>E24CS001</td>
-                            <td>john.doe@example.com</td>
-                            <td>CSE</td>
-                            <td>2</td>
-                            <td>3</td>
+                            <td>John Doe</td><td>E24CS001</td><td>john.doe@example.com</td>
+                            <td>CSE</td><td>2</td><td>3</td>
                         </tr>
                         <tr>
-                            <td>Jane Smith</td>
-                            <td>E24EC002</td>
-                            <td>jane.smith@example.com</td>
-                            <td>ECE</td>
-                            <td>1</td>
-                            <td>2</td>
+                            <td>Jane Smith</td><td>E24EC002</td><td>jane.smith@example.com</td>
+                            <td>ECE</td><td>1</td><td>2</td>
                         </tr>
                         <tr>
-                            <td>Mike Johnson</td>
-                            <td>E24ME003</td>
-                            <td>mike.johnson@example.com</td>
-                            <td>MECH</td>
-                            <td>3</td>
-                            <td>5</td>
+                            <td>Mike Johnson</td><td>E24ME003</td><td>mike.johnson@example.com</td>
+                            <td>MECH</td><td>3</td><td>5</td>
                         </tr>
                     </table>
                 </body>
@@ -1149,20 +1454,5 @@ if (isset($_SESSION['bulk_errors'])) {
             document.body.removeChild(link);
         }
     </script>
-</body>
-</html>
-
-
-
-indha code la filter work aagala andha filter ah correct pani kudu
-
-" code between  and  in the most up-to-date Canvas "admin/manage_users.php (Updated)" document above and am asking a query about/based on this code below.
-Instructions to follow:
-  * Don't output/edit the document if the query is Direct/Simple. For example, if the query asks for a simple explanation, output a direct answer.
-  * Make sure to **edit** the document if the query shows the intent of editing the document, in which case output the entire edited document, **not just that section or the edits**.
-    * Don't output the same document/empty document and say that you have edited it.
-    * Don't change unrelated code in the document.
-  * Don't output  and  in your final response.
-  * Any references like "this" or "selected code" refers to the code between  and  tags.
-  * Just acknowledge my request in the introduction.
-  * Make sure to refer to the document as "Canvas" in your response.
+    </body>
+    </html>

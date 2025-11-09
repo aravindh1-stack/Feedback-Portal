@@ -29,6 +29,13 @@ if ($code !== $_SESSION['otp_code']) {
 $_SESSION['user'] = $_SESSION['pending_user'];
 $_SESSION['role'] = $_SESSION['pending_role'];
 
+// Set role-specific session ids for downstream pages/APIs
+if ($_SESSION['role'] === 'student') {
+    if (isset($_SESSION['user']['id'])) { $_SESSION['student_id'] = (int)$_SESSION['user']['id']; }
+} elseif ($_SESSION['role'] === 'faculty') {
+    if (isset($_SESSION['user']['id'])) { $_SESSION['faculty_id'] = (int)$_SESSION['user']['id']; }
+}
+
 // Clear OTP data
 unset($_SESSION['otp_code'], $_SESSION['otp_expires'], $_SESSION['pending_user'], $_SESSION['pending_role'], $_SESSION['otp_email']);
 

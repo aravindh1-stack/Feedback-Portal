@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "functions": {
+    "index.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/dashboard.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/manage_users.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/create_feedback_form.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/manage_forms.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/view_feedback.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/student_feedback_list.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/view_student_response.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/detailed_report.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/generate_report_pdf.php": {
+      "runtime": "@vercel/php"
+    },
+    "admin/faculty_report_pdf.php": {
+      "runtime": "@vercel/php"
+    }
+  },
+  "rewrites": [
+    { "source": "/admin/dashboard", "destination": "/admin/dashboard.php" },
+    { "source": "/admin/manage_users", "destination": "/admin/manage_users.php" },
+    { "source": "/admin/create_feedback_form", "destination": "/admin/create_feedback_form.php" },
+    { "source": "/admin/manage_forms", "destination": "/admin/manage_forms.php" },
+    { "source": "/admin/view_feedback", "destination": "/admin/view_feedback.php" },
+    { "source": "/admin/student_feedback_list", "destination": "/admin/student_feedback_list.php" },
+    { "source": "/admin/view_student_response", "destination": "/admin/view_student_response.php" },
+    { "source": "/admin/detailed_report", "destination": "/admin/detailed_report.php" },
+    { "source": "/admin/generate_report_pdf", "destination": "/admin/generate_report_pdf.php" },
+    { "source": "/admin/faculty_report_pdf", "destination": "/admin/faculty_report_pdf.php" },
+    {
+      "source": "/(.*)",
+      "destination": "/index.php"
+    }
+  ]
+}

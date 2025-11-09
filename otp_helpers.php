@@ -24,6 +24,43 @@ function send_otp_email($toEmail, $otp) {
              . "<p>Regards,<br>$fromName</p>"
              . "</body></html>";
 
+    // HTTP provider (e.g., Brevo) if configured
+    if (!empty($config['email_provider']) && strtolower($config['email_provider']) === 'brevo' && !empty($config['brevo_api_key'])) {
+        try {
+            $payload = [
+                'sender' => [ 'email' => $from, 'name' => $fromName ],
+                'to' => [ [ 'email' => $toEmail ] ],
+                'subject' => $subject,
+                'htmlContent' => $message,
+            ];
+            $ch = curl_init('https://api.brevo.com/v3/smtp/email');
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Accept: application/json',
+                'Content-Type: application/json',
+                'api-key: ' . $config['brevo_api_key'],
+            ]);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+            curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+            $resp = curl_exec($ch);
+            $err = curl_error($ch);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($err) {
+                // Log HTTP error
+                $logDir = __DIR__ . '/../logs'; if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+                @file_put_contents($logDir . '/mail.log', '['.date('Y-m-d H:i:s')."] Brevo error: $err\n", FILE_APPEND);
+                return false;
+            }
+            return ($code >= 200 && $code < 300);
+        } catch (Throwable $e) {
+            $logDir = __DIR__ . '/../logs'; if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
+            @file_put_contents($logDir . '/mail.log', '['.date('Y-m-d H:i:s')."] Brevo exception: ".$e->getMessage()."\n", FILE_APPEND);
+            return false;
+        }
+    }
+
     // If SMTP is enabled and PHPMailer is available, use it
     if (!empty($config['smtp_enabled'])) {
         $autoload = __DIR__ . '/../vendor/autoload.php';

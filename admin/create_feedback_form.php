@@ -26,17 +26,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $department = $_POST['department'] ?? '';
     $year = $_POST['year'] ?? '';
     $semester = $_POST['semester'] ?? '';
+    $assignments = $_POST['assignments'] ?? [];
     $questions = $_POST['questions'] ?? [];
     $form_number = $_POST['form_number'] ?? '';
 
-    if (!empty($department) && !empty($year) && !empty($semester) && !empty($questions) && !empty($form_number)) {
+    if (!empty($department) && !empty($year) && !empty($semester) && !empty($questions) && !empty($assignments) && !empty($form_number)) {
         try {
             $conn->begin_transaction();
-            foreach ($questions as $question) {
-                if (!empty($question['text']) && !empty($question['subject']) && !empty($question['faculty'])) {
-                    $stmt = $conn->prepare("INSERT INTO feedback_forms (form_number, department, year, semester, subject_code, faculty_id, question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
-                    $stmt->bind_param("sssssis", $form_number, $department, $year, $semester, $question['subject'], $question['faculty'], $question['text']);
-                    $stmt->execute();
+            // Ensure form_questions table exists
+            $conn->query("CREATE TABLE IF NOT EXISTS form_questions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                form_number VARCHAR(64) NOT NULL,
+                question_text VARCHAR(500) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_form_question (form_number, question_text)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            // Insert unique questions for this form into form_questions
+            $seenTexts = [];
+            $stmtQ = $conn->prepare("INSERT IGNORE INTO form_questions (form_number, question_text) VALUES (?, ?)");
+            foreach ($questions as $q) {
+                $qtext = trim($q['text'] ?? '');
+                if ($qtext !== '' && !isset($seenTexts[$qtext])) {
+                    $seenTexts[$qtext] = true;
+                    $stmtQ->bind_param("ss", $form_number, $qtext);
+                    $stmtQ->execute();
+                }
+            }
+
+            // Cross-assign all question texts to every subject/faculty assignment
+            foreach ($assignments as $row) {
+                $subject_code = trim($row['code'] ?? '');
+                $subject_name = trim($row['name'] ?? ''); // optional, not stored currently
+                $faculty_id = intval($row['faculty'] ?? 0);
+                if ($subject_code !== '' && $faculty_id > 0) {
+                    foreach ($questions as $q) {
+                        $qtext = trim($q['text'] ?? '');
+                        if ($qtext !== '') {
+                            $stmt = $conn->prepare("INSERT INTO feedback_forms (form_number, department, year, semester, subject_code, faculty_id, question, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
+                            $stmt->bind_param("sssssis", $form_number, $department, $year, $semester, $subject_code, $faculty_id, $qtext);
+                            $stmt->execute();
+                        }
+                    }
                 }
             }
             $conn->commit();
@@ -48,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['message_type'] = 'error';
         }
     } else {
-        $_SESSION['message'] = "Please fill all required fields and add at least one question.";
+        $_SESSION['message'] = "Please fill all required fields, add at least one subject/faculty assignment and at least one question.";
         $_SESSION['message_type'] = 'error';
     }
     header("Location: create_feedback_form.php");
@@ -93,156 +124,472 @@ if (isset($_SESSION['message'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Feedback Form - Admin Dashboard</title>
-    
+    <title>Create Feedback Form - Aarasys</title>
+
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzQzMzhDMyIvPgo8cGF0aCBkPSJNOCAxMkg5VjIwSDhWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTEgMTJIMTJWMjBIMTFWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8cGF0aCBkPSJNMTQgMTJIMTVWMjBIMTRWMTJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     
     <style>
+        /* === NEW DESIGN STYLES (FROM manage_users.php) === */
+
+        /* 1. CSS Variables (Theme) */
         :root {
-            --primary-50: #eff6ff; --primary-500: #3b82f6; --primary-600: #2563eb;
-            --success-100: #dcfce7; --success-500: #16a34a;
-            --danger-100: #fee2e2; --danger-500: #dc2626; --danger-600: #b91c1c;
-            --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-400: #9ca3af;
-            --gray-500: #6b7280; --gray-600: #4b5563; --gray-800: #1f2937; --gray-900: #111827;
-            --body-bg: var(--gray-50); --sidebar-bg: #ffffff; --card-bg: #ffffff; --header-bg: rgba(255, 255, 255, 0.85);
-            --border-color: var(--gray-200); --text-color: var(--gray-600); --heading-color: var(--gray-900);
-            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05); --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --radius-lg: 0.75rem; --radius-xl: 1rem;
-            --spacing-2: 0.5rem; --spacing-3: 0.75rem; --spacing-4: 1rem; --spacing-5: 1.25rem; --spacing-6: 1.5rem; --spacing-8: 2rem;
-            --font-size-sm: 0.875rem; --font-size-base: 1rem; --font-size-lg: 1.125rem; --font-size-2xl: 1.5rem;
-            --transition-fast: all 0.2s ease-in-out; --transition-normal: all 0.3s ease-in-out;
-            --sidebar-width: 280px; --header-height: 80px;
+            /* Palette */
+            --primary-blue: #3b82f6; 
+            --primary-purple: #6366F1;
+            --dark-bg: #1f2937;
+            --light-bg: #f8f9fa;    /* <-- "Dim White" Page Background */
+            --card-bg: #ffffff;     /* <-- White Card Background */
+            --border-color: #e5e7eb;
+            --text-dark: #111827;
+            --text-body: #4b5563;
+            --text-light: #f9fafb;
+            --text-muted: #9ca3af;
+            --text-blue: #2563eb;
+            --success-bg: #dcfce7;
+            --success-text: #16a34a;
+            --danger-bg: #fee2e2;
+            --danger-text: #dc2626;
+            --info-bg: #eff6ff;
+            --info-text: #2563eb;
+            
+            /* Sizing & Spacing */
+            --sidebar-width: 280px;
+            --header-height: 88px;
+            --radius-sm: 0.375rem; --radius-md: 0.5rem; --radius-lg: 0.75rem;
+            --radius-xl: 1rem; --radius-2xl: 1.5rem; --radius-full: 9999px;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 2px 0 rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
         }
+
+        /* 2. Base & Reset */
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', sans-serif; background-color: var(--body-bg); color: var(--text-color); line-height: 1.6; }
-        .admin-layout { display: flex; }
-        .main-content { margin-left: var(--sidebar-width); flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
-        .content { flex: 1; padding: 3rem var(--spacing-8); }
-        .sidebar { width: var(--sidebar-width); background: var(--sidebar-bg); border-right: 1px solid var(--border-color); position: fixed; height: 100vh; display: flex; flex-direction: column; z-index: 1000; transition: var(--transition-normal); }
-        .sidebar-header { height: var(--header-height); padding: 0 var(--spacing-6); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; }
-        .sidebar-logo { display: flex; align-items: center; gap: var(--spacing-3); font-size: var(--font-size-lg); font-weight: 600; color: var(--heading-color); }
-        .sidebar-logo i { width: 40px; height: 40px; background: var(--primary-500); color: white; border-radius: var(--radius-lg); display: grid; place-items: center; font-size: 1.2rem; }
-        .sidebar-subtitle { font-size: var(--font-size-sm); color: var(--gray-500); font-weight: 500; }
-        .sidebar-nav { padding: var(--spacing-4) 0; flex-grow: 1; }
-        .nav-section-title { font-size: var(--font-size-sm); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 var(--spacing-6) var(--spacing-3); color: var(--gray-400); }
-        .nav-item { display: flex; align-items: center; gap: var(--spacing-4); padding: var(--spacing-3) var(--spacing-6); color: var(--text-color); text-decoration: none; margin: var(--spacing-2) var(--spacing-4); border-radius: var(--radius-lg); font-weight: 500; transition: var(--transition-fast); }
-        .nav-item:hover { background: var(--primary-50); color: var(--primary-600); }
-        .nav-item.active { background-color: var(--primary-50); color: var(--primary-600); font-weight: 700; position: relative; }
-        .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 4px; height: 24px; background: var(--primary-500); border-radius: 0 4px 4px 0; }
-        .nav-item.danger:hover { background-color: var(--danger-100); color: var(--danger-600); }
-        .nav-item i { width: 20px; text-align: center; }
-        .header { height: var(--header-height); background: var(--header-bg); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--spacing-8); position: sticky; top: 0; z-index: 999; }
-        .page-title { font-size: var(--font-size-2xl); font-weight: 700; color: var(--heading-color); }
-        .card { background: var(--card-bg); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); margin-bottom: 2rem; }
-        .card-header { padding: var(--spacing-5) var(--spacing-6); border-bottom: 1px solid var(--border-color); }
-        .card-title { font-size: var(--font-size-lg); font-weight: 600; color: var(--heading-color); }
-        .card-body { padding: var(--spacing-6); }
-        .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--spacing-6); margin-bottom: 2rem; }
-        .form-group label { display: block; margin-bottom: var(--spacing-2); font-weight: 500; color: var(--gray-800); }
-        .form-control { width: 100%; padding: var(--spacing-2) var(--spacing-3); border: 1px solid var(--border-color); border-radius: var(--radius-lg); transition: var(--transition-fast); }
-        .form-control:focus { outline: none; border-color: var(--primary-500); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
-        .form-control.textarea-lg { min-height: 120px; padding-top: var(--spacing-3); padding-right: 3rem; }
-        .btn { display: inline-flex; align-items: center; gap: var(--spacing-2); padding: 0.6rem 1.2rem; border-radius: var(--radius-lg); font-weight: 600; text-decoration: none; border: none; cursor: pointer; transition: var(--transition-fast); }
-        .btn-primary { background: var(--primary-500); color: white; }
-        .btn-primary:hover { background: var(--primary-600); }
-        .btn-success { background: var(--success-500); color: white; }
-        .btn-success:hover { background-color: #15803d; }
-        .btn-danger { background: var(--danger-500); color: white; }
-        .btn-danger:hover { background: var(--danger-600); }
-        .btn-secondary { background: var(--gray-100); color: var(--gray-700); }
-        .btn-secondary:hover { background: var(--gray-200); }
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1001; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--transition-fast); }
-        .modal-overlay.active { display: flex; opacity: 1; }
-        .modal-content { background: var(--card-bg); padding: var(--spacing-8); border-radius: var(--radius-xl); max-width: 500px; width: 90%; box-shadow: var(--shadow-lg); position: relative; transform: scale(0.95); transition: transform var(--transition-fast); }
-        .modal-overlay.active .modal-content { transform: scale(1); }
-        .modal-close { position: absolute; top: 1rem; right: 1rem; background: none; border: none; font-size: 1.5rem; color: var(--gray-400); cursor: pointer; }
-        #questionsContainer .card { margin-top: 1.5rem; }
-        #questionsContainer .card-header { display: flex; justify-content: space-between; align-items: center; background-color: var(--gray-50); }
-        .question-number { font-weight: 600; color: var(--heading-color); }
-        .actions-container { display: flex; gap: 1rem; margin-top: 1.5rem; align-items: center; }
-        .textarea-wrapper { position: relative; }
-        .suggestion-btn { position: absolute; top: 0.75rem; right: 0.75rem; background: var(--success-100); color: var(--success-500); border: 1px solid var(--success-500); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; transition: var(--transition-fast); }
-        .suggestion-btn:hover { background: var(--success-500); color: white; transform: rotate(15deg) scale(1.1); }
         
-        /* Animations */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--light-bg);
+            color: var(--text-body);
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        a { text-decoration: none; color: inherit; }
+        button { font-family: inherit; }
+
+        /* 3. Main Layout */
+        .admin-layout { display: flex; }
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            transition: margin-left 0.3s ease; /* Sidebar collapse animation */
+        }
+        body.sidebar-collapsed .main-content {
+            margin-left: 92px; /* Collapsed sidebar width */
+        }
+        .content-area {
+            padding: 2rem 2.5rem;
+            flex: 1;
+        }
+
+        /* 4. Header (Topbar) */
+        .header {
+            height: var(--header-height);
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2.5rem;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+        }
+        .header-title {
+            font-size: 1.75rem; 
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+        .header-actions { display: flex; align-items: center; gap: 1rem; }
+        .search-wrapper { position: relative; }
+        .search-wrapper i {
+            position: absolute; left: 1rem; top: 50%;
+            transform: translateY(-50%); color: var(--text-muted);
+        }
+        .search-input {
+            padding: 0.75rem 1rem 0.75rem 2.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background-color: var(--light-bg);
+            font-size: 0.9rem;
+            width: 280px;
+            transition: all 0.2s ease;
+        }
+        .search-input:focus {
+            outline: none; border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+            background-color: var(--card-bg);
+        }
+        .header-btn {
+            width: 44px; height: 44px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background-color: var(--card-bg);
+            display: grid; place-items: center;
+            font-size: 1.1rem; color: var(--text-body);
+            cursor: pointer; transition: all 0.2s ease;
+        }
+        .header-btn:hover { border-color: var(--primary-blue); color: var(--primary-blue); }
+        .user-avatar {
+            width: 44px; height: 44px;
+            border-radius: 50%;
+            background-color: var(--primary-purple);
+            color: var(--text-light);
+            display: grid; place-items: center;
+            font-weight: 600; font-size: 1.1rem;
+            border: 2px solid var(--card-bg);
+            box-shadow: 0 0 0 2px var(--primary-purple);
+            cursor: pointer;
+        }
+
+        /* 5. Buttons */
+        .btn {
+            display: inline-flex; align-items: center;
+            gap: 0.5rem; padding: 0.65rem 1rem;
+            border-radius: var(--radius-md);
+            font-weight: 600; text-decoration: none;
+            border: none; cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        .btn-primary { background-color: var(--primary-blue); color: var(--text-light); }
+        .btn-primary:hover { background-color: var(--text-blue); box-shadow: var(--shadow-md); }
+        .btn-secondary {
+            background-color: var(--card-bg);
+            color: var(--text-body);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+        }
+        .btn-secondary:hover { background-color: var(--light-bg); border-color: #d1d5db; }
+        .btn-danger { background-color: var(--danger-text); color: var(--text-light); }
+        .btn-danger:hover { background-color: #b91c1c; box-shadow: var(--shadow-md); }
+        .btn-success { background-color: var(--success-text); color: var(--text-light); }
+        .btn-success:hover { background-color: #15803d; box-shadow: var(--shadow-md); }
+
+        /* 6. Card */
+        .grid-card {
+            background-color: var(--card-bg);
+            border-radius: var(--radius-xl);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 1.5rem;
+        }
+        .grid-card-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-dark);
+        }
+        .card-title .badge {
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 0.2rem 0.6rem;
+            background-color: var(--info-bg);
+            color: var(--info-text);
+            border-radius: var(--radius-full);
+            vertical-align: middle;
+            margin-left: 0.5rem;
+        }
+        .grid-card-body {
+            padding: 1.5rem;
+        }
+
+        /* 7. Forms */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .form-group label {
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--text-dark);
+        }
+        .form-control {
+            width: 100%;
+            padding: 0.65rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            background-color: var(--card-bg);
+            color: var(--text-body);
+            transition: all 0.2s ease;
+        }
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        .form-control.textarea-lg {
+            min-height: 120px;
+            padding-top: 0.75rem;
+            padding-right: 3rem;
+            resize: vertical;
+        }
+        
+        /* 8. Modals */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(17, 24, 39, 0.6);
+            backdrop-filter: blur(5px);
+            z-index: 1001;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .modal-overlay.active { display: flex; opacity: 1; }
+        .modal-content {
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: var(--radius-xl);
+            max-width: 700px;
+            width: 90%;
+            box-shadow: var(--shadow-lg);
+            position: relative;
+            transform: scale(0.95) translateY(10px);
+            transition: all 0.2s ease-out;
+        }
+        .modal-overlay.active .modal-content { transform: scale(1) translateY(0); }
+        .modal-close {
+            position: absolute; top: 0.75rem; right: 0.75rem;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            background: none; border: none;
+            font-size: 1.5rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: grid; place-items: center;
+            transition: all 0.2s ease;
+        }
+        .modal-close:hover { background-color: var(--light-bg); color: var(--text-dark); }
+        .modal-content h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 1.5rem;
+        }
+        
+        /* 9. Loader */
+        .loader-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(5px);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .loader-spinner {
+            border: 5px solid var(--border-color);
+            border-top: 5px solid var(--primary-blue);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* 10. NEW STYLES for this page */
+
+        /* Sub-cards for questions/assignments */
+        .sub-card {
+            background-color: var(--light-bg); /* "Dim white" bg */
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+            margin-bottom: 1rem;
+            box-shadow: none; /* No shadow for sub-cards */
+            animation: fadeInUp 0.4s ease-out forwards;
+            opacity: 0;
+        }
+        .sub-card-header {
+            padding: 0.75rem 1.25rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .sub-card-title {
+            font-weight: 600;
+            color: var(--text-dark);
+            font-size: 0.9rem;
+        }
+        /* Icon button for delete */
+        .btn-icon {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            display: grid; place-items: center;
+            background: none; border: none;
+            cursor: pointer; color: var(--text-muted);
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+        .btn-icon.danger:hover {
+            background-color: var(--danger-bg);
+            color: var(--danger-text);
+        }
+        
+        /* Suggestion Button Style */
+        .textarea-wrapper { position: relative; }
+        .suggestion-btn {
+            position: absolute;
+            top: 0.75rem; right: 0.75rem;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            border: 1px solid #f59e0b; /* Orange */
+            background: #fef3c7; /* Light orange */
+            color: #d97706; /* Dark orange */
+            cursor: pointer;
+            display: grid; place-items: center;
+            transition: all 0.2s ease;
+        }
+        .suggestion-btn:hover {
+            background: #f59e0b;
+            color: white;
+            transform: scale(1.1);
+            box-shadow: var(--shadow-md);
+        }
+        
+        /* Preview Modal Styles */
+        #previewBody {
+            max-height: 60vh;
+            overflow-y: auto;
+            padding: 0 0.5rem;
+        }
+        #previewBody h4 {
+            font-size: 1.1rem;
+            color: var(--text-dark);
+            font-weight: 600;
+            margin-top: 1.25rem;
+            margin-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.25rem;
+        }
+        #previewBody p {
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
+        }
+        #previewBody p strong {
+            color: var(--text-dark);
+        }
+        #previewBody ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        #previewBody li {
+            background: var(--light-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+        #previewBody li small {
+            color: var(--text-body);
+            font-style: italic;
+            display: block;
+            margin-top: 0.25rem;
+        }
+
+        /* 11. Responsive */
+        @media (max-width: 992px) {
+            .form-grid { grid-template-columns: 1fr; }
+            .form-grid-assignments { grid-template-columns: 1fr !important; }
+        }
+        @media (max-width: 768px) {
+            .main-content { margin-left: 0; }
+            .sidebar { display: none; /* Add JS to toggle */ }
+            .content-area { padding: 1.5rem 1rem; }
+            .header { padding: 0 1rem; }
+            .header-title { display: none; }
+            .header .search-wrapper { display: none; }
+        }
+
+        /* 12. Animations */
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .animated { animation: fadeInUp 0.5s ease-out forwards; opacity: 0; }
-
-        @media (max-width: 768px) {
-            .main-content { margin-left: 0; }
-            .sidebar { transform: translateX(-100%); }
-            .sidebar.active { transform: translateX(0); }
-            .content { padding: 2rem 1rem; }
-            .header { padding: 0 1rem; }
-            .form-grid { grid-template-columns: 1fr; }
+        .animated {
+            animation: fadeInUp 0.5s ease-out forwards;
+            opacity: 0;
         }
+
     </style>
 </head>
 <body>
+    
+    <div id="loadingOverlay" class="loader-overlay">
+        <div class="loader-spinner"></div>
+    </div>
+
     <div class="admin-layout">
-        <!-- Sidebar -->
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <a href="dashboard.php" style="text-decoration: none;">
-                    <div class="sidebar-logo">
-                        <i class="fas fa-graduation-cap"></i>
-                        <div>
-                            <div>College Feedback</div>
-                            <div class="sidebar-subtitle">Admin Panel</div>
-                        </div>
-                    </div>
-                </a>
-            </div>
-            
-            <div class="sidebar-nav">
-                <div class="nav-section">
-                    <div class="nav-section-title">Main</div>
-                    <a href="dashboard.php" class="nav-item"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-                    <a href="#" class="nav-item"><i class="fas fa-chart-bar"></i> Analytics</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">Management</div>
-                    <a href="manage_users.php" class="nav-item"><i class="fas fa-users"></i> Users</a>
-                    <a href="create_feedback_form.php" class="nav-item active"><i class="fas fa-file-alt"></i> Create Form</a>
-                    <a href="manage_forms.php" class="nav-item"><i class="fas fa-tasks"></i> Manage Forms</a>
-                    <a href="view_feedback.php" class="nav-item"><i class="fas fa-comments"></i> View Feedback</a>
-                    <a href="student_feedback_list.php" class="nav-item"><i class="fas fa-user-graduate"></i> Student Data</a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">System</div>
-                    <a href="#" class="nav-item"><i class="fas fa-cog"></i> Settings</a>
-                    <a href="../includes/logout.php" class="nav-item danger"><i class="fas fa-sign-out-alt"></i> Logout</a>
-                </div>
-            </div>
-        </nav>
+        
+        <?php include __DIR__ . '/includes/sidebar.php'; ?>
 
-        <!-- Main Content -->
         <main class="main-content">
+            
             <header class="header">
-                 <div>
-                    <h1 class="page-title">Create Feedback Form</h1>
-                 </div>
+                <h1 class="header-title">Create Form</h1>
+                
+                <div class="header-actions">
+                    <button class="header-btn" title="Toggle Theme" id="themeToggleBtn">
+                        <i class="fas fa-sun"></i>
+                    </button>
+                    <button class="header-btn" title="Notifications">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    <div class="user-avatar" title="Admin">AD</div>
+                </div>
             </header>
-
-            <div class="content">
+            
+            <div class="content-area">
+                
                 <form id="feedbackForm" method="post" onsubmit="showLoader()">
                     <input type="hidden" name="form_number" value="<?php echo htmlspecialchars($current_form_number); ?>">
                     
-                    <!-- Step 1: Form Details -->
-                    <div class="card animated" style="animation-delay: 0.1s;">
-                        <div class="card-header">
-                            <h2 class="card-title">Step 1: Form Details (Form Number: <?php echo htmlspecialchars($current_form_number); ?>)</h2>
+                    <div class="grid-card animated" style="animation-delay: 0.1s;">
+                        <div class="grid-card-header">
+                            <h3 class="card-title">
+                                Step 1: Form Details
+                                <span class="badge"><?php echo htmlspecialchars($current_form_number); ?></span>
+                            </h3>
                         </div>
-                        <div class="card-body">
+                        <div class="grid-card-body">
                             <div class="form-grid">
                                 <div class="form-group">
                                     <label for="department">Department</label>
@@ -276,16 +623,29 @@ if (isset($_SESSION['message'])) {
                         </div>
                     </div>
 
-                    <!-- Step 2: Questions -->
-                    <div class="card animated" style="animation-delay: 0.2s;">
-                         <div class="card-header">
-                            <h2 class="card-title">Step 2: Add Questions</h2>
+                    <div class="grid-card animated" style="animation-delay: 0.2s;">
+                        <div class="grid-card-header">
+                            <h3 class="card-title">Step 2: Assign Subjects & Faculty</h3>
                         </div>
-                        <div class="card-body">
-                             <div id="questionsContainer">
-                                <!-- Question cards will be dynamically inserted here -->
+                        <div class="grid-card-body">
+                            <div id="assignmentsContainer">
+                                </div>
+                            <div style="margin-top: 1.5rem;">
+                                <button type="button" class="btn btn-secondary" onclick="addAssignmentRow()">
+                                    <i class="fas fa-plus"></i> Add Another Subject
+                                </button>
                             </div>
-                            <div class="actions-container">
+                        </div>
+                    </div>
+
+                    <div class="grid-card animated" style="animation-delay: 0.25s;">
+                        <div class="grid-card-header">
+                            <h3 class="card-title">Step 3: Create Questions</h3>
+                        </div>
+                        <div class="grid-card-body">
+                            <div id="questionsContainer">
+                                </div>
+                            <div style="margin-top: 1.5rem;">
                                 <button type="button" class="btn btn-secondary" onclick="addQuestion()">
                                     <i class="fas fa-plus"></i> Add Blank Question
                                 </button>
@@ -293,21 +653,17 @@ if (isset($_SESSION['message'])) {
                         </div>
                     </div>
 
-                    <!-- Submit Button -->
-                     <div class="animated" style="animation-delay: 0.3s; margin-top: 2rem; text-align: right; display: flex; justify-content: flex-end; gap: 1rem;">
-                        <button type="button" class="btn btn-primary" onclick="previewForm()"><i class="fas fa-eye"></i> Preview Form</button>
-                        <button type="submit" class="btn btn-success" style="padding: 0.8rem 2rem; font-size: 1rem;"><i class="fas fa-save"></i> Create Form</button>
+                    <div class="animated" style="animation-delay: 0.3s; margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 1rem;">
+                        <button type="button" class="btn btn-secondary" onclick="previewForm()"><i class="fas fa-eye"></i> Preview</button>
+                        <button type="submit" class="btn btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem;"><i class="fas fa-check"></i> Create & Save Form</button>
                     </div>
                 </form>
-            </div>
-        </main>
-    </div>
-
-    <!-- Modals -->
-    <div id="messageModal" class="modal-overlay">
-        <div class="modal-content" style="text-align: center;">
+                
+            </div> </main> </div> <div id="messageModal" class="modal-overlay">
+        <div class="modal-content" style="text-align: center; max-width: 450px;">
+            <button class="modal-close" onclick="closeModal('messageModal')">&times;</button>
             <div id="messageIcon" style="font-size: 3rem; margin-bottom: 1rem;"></div>
-            <h2 id="messageText" style="margin-bottom: 1.5rem;"></h2>
+            <h2 id="messageText" style="margin-bottom: 1.5rem; font-size: 1.1rem; line-height: 1.6;"></h2>
             <button class="btn btn-primary" onclick="closeModal('messageModal')">Close</button>
         </div>
     </div>
@@ -326,6 +682,7 @@ if (isset($_SESSION['message'])) {
 
     <script>
         let questionCount = 0;
+        let assignmentCount = 0;
         const facultyData = <?php echo json_encode($facultyData); ?>;
         const sampleQuestions = {
             'CSE': [
@@ -357,20 +714,21 @@ if (isset($_SESSION['message'])) {
 
         function openModal(modalId) { 
             const modal = document.getElementById(modalId);
-            modal.classList.add('active');
+            if(modal) modal.classList.add('active');
         }
         function closeModal(modalId) { 
             const modal = document.getElementById(modalId);
-            modal.classList.remove('active');
+            if(modal) modal.classList.remove('active');
         }
         
         function showMessageModal(message, type) {
-            const icon = document.getElementById('messageIcon');
-            const text = document.getElementById('messageText');
+            const modal = document.getElementById('messageModal');
+            const icon = modal.querySelector('#messageIcon');
+            const text = modal.querySelector('#messageText');
             if (type === 'success') {
-                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-500);"></i>';
+                icon.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-text);"></i>';
             } else {
-                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-500);"></i>';
+                icon.innerHTML = '<i class="fas fa-times-circle" style="color: var(--danger-text);"></i>';
             }
             text.textContent = message;
             openModal('messageModal');
@@ -392,7 +750,7 @@ if (isset($_SESSION['message'])) {
             }
             const questions = sampleQuestions[department] || sampleQuestions['Default'];
             const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
-            const textarea = document.querySelector(`[data-index="${index}"] textarea`);
+            const textarea = document.querySelector(`[data-q-index="${index}"] textarea`);
             if (textarea) {
                 textarea.value = randomQuestion;
             }
@@ -402,18 +760,20 @@ if (isset($_SESSION['message'])) {
             const container = document.getElementById('questionsContainer');
             const newIndex = questionCount++;
             const card = document.createElement('div');
-            card.className = 'card animated';
-            card.setAttribute('data-index', newIndex);
+            // USE NEW CSS CLASSES
+            card.className = 'sub-card animated'; 
+            card.setAttribute('data-q-index', newIndex);
             card.style.animationDelay = `${(container.children.length * 0.05)}s`;
 
+            // USE NEW HTML STRUCTURE
             card.innerHTML = `
-                <div class="card-header">
-                    <span class="question-number">Question ${questionCount}</span>
-                    <button type="button" class="btn btn-danger" style="padding: 0.3rem 0.6rem;" onclick="removeQuestion(${newIndex})">
+                <div class="sub-card-header">
+                    <span class="sub-card-title">Question ${container.children.length + 1}</span>
+                    <button type="button" class="btn-icon danger" title="Remove" onclick="removeQuestion(${newIndex})">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
-                <div class="card-body">
+                <div class="grid-card-body">
                     <div class="form-group">
                         <label>Question Text</label>
                         <div class="textarea-wrapper">
@@ -423,18 +783,6 @@ if (isset($_SESSION['message'])) {
                             </button>
                         </div>
                     </div>
-                    <div class="form-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 0;">
-                        <div class="form-group">
-                            <label>Subject Code</label>
-                            <input type="text" class="form-control" name="questions[${newIndex}][subject]" placeholder="E.g., CS101" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Faculty</label>
-                            <select class="form-control" name="questions[${newIndex}][faculty]" required>
-                                ${generateFacultyOptions()}
-                            </select>
-                        </div>
-                    </div>
                 </div>
             `;
             container.appendChild(card);
@@ -442,7 +790,7 @@ if (isset($_SESSION['message'])) {
         }
 
         function removeQuestion(index) {
-            const card = document.querySelector(`[data-index="${index}"]`);
+            const card = document.querySelector(`[data-q-index="${index}"]`);
             if (card) {
                 card.remove();
                 updateQuestionNumbers();
@@ -450,8 +798,63 @@ if (isset($_SESSION['message'])) {
         }
         
         function updateQuestionNumbers() {
-            document.querySelectorAll('#questionsContainer .card').forEach((card, index) => {
-                card.querySelector('.question-number').textContent = `Question ${index + 1}`;
+            document.querySelectorAll('#questionsContainer .sub-card').forEach((card, index) => {
+                card.querySelector('.sub-card-title').textContent = `Question ${index + 1}`;
+            });
+        }
+
+        function addAssignmentRow() {
+            const container = document.getElementById('assignmentsContainer');
+            const idx = assignmentCount++;
+            const row = document.createElement('div');
+            // USE NEW CSS CLASSES
+            row.className = 'sub-card animated';
+            row.setAttribute('data-assign-index', idx);
+            row.style.animationDelay = `${(container.children.length * 0.05)}s`;
+
+            // USE NEW HTML STRUCTURE
+            row.innerHTML = `
+                <div class="sub-card-header">
+                    <span class="sub-card-title">Subject/Faculty ${container.children.length + 1}</span>
+                    <button type="button" class="btn-icon danger" title="Remove" onclick="removeAssignmentRow(${idx})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+                <div class="grid-card-body">
+                    <div class="form-grid form-grid-assignments" style="grid-template-columns: 1fr 2fr 1.5fr;">
+                        <div class="form-group">
+                            <label>Subject Code</label>
+                            <input type="text" class="form-control" name="assignments[${idx}][code]" placeholder="E.g., CS101" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Subject Name</label>
+                            <input type="text" class="form-control" name="assignments[${idx}][name]" placeholder="E.g., Data Structures">
+                        </div>
+                        <div class="form-group">
+                            <label>Faculty</label>
+                            <select class="form-control" name="assignments[${idx}][faculty]" required>
+                                ${generateFacultyOptions()}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(row);
+            updateAssignmentNumbers();
+        }
+
+        function removeAssignmentRow(idx) {
+            const row = document.querySelector(`[data-assign-index="${idx}"]`);
+            if (row) {
+                row.remove();
+                updateAssignmentNumbers();
+            }
+        }
+
+        function updateAssignmentNumbers() {
+            document.querySelectorAll('#assignmentsContainer .sub-card').forEach((card, index) => {
+                const label = card.querySelector('.sub-card-title');
+                if (label) label.textContent = `Subject/Faculty ${index + 1}`;
             });
         }
         
@@ -465,12 +868,17 @@ if (isset($_SESSION['message'])) {
             const year = yearSelect.options[yearSelect.selectedIndex].text;
             const semester = semSelect.options[semSelect.selectedIndex].text;
             
-            const questions = Array.from(document.querySelectorAll('#questionsContainer .card')).map((card, index) => {
+            const assignments = Array.from(document.querySelectorAll('#assignmentsContainer .sub-card')).map((card, index) => {
+                const code = card.querySelector('input[name^="assignments"][name$="[code]"]').value;
+                const name = card.querySelector('input[name^="assignments"][name$="[name]"]').value;
+                const facultySelect = card.querySelector('select[name^="assignments"][name$="[faculty]"]');
+                const facultyName = facultySelect && facultySelect.selectedIndex > 0 ? facultySelect.options[facultySelect.selectedIndex].text : 'Not Selected';
+                return `<li><strong>${code || 'No Code'}</strong> - ${name || 'Untitled Subject'}<small>Faculty: ${facultyName}</small></li>`;
+            }).join('');
+
+            const questions = Array.from(document.querySelectorAll('#questionsContainer .sub-card')).map((card, index) => {
                 const text = card.querySelector('textarea').value;
-                const subject = card.querySelector('input[type="text"]').value;
-                const facultySelect = card.querySelector('select');
-                const facultyName = facultySelect.options[facultySelect.selectedIndex].text;
-                return `<li><strong>Q${index+1}: ${text}</strong><br><small>Subject: ${subject} | Faculty: ${facultyName}</small></li>`;
+                return `<li><strong>Q${index+1}:</strong> ${text || '<i>Empty Question</i>'}</li>`;
             }).join('');
             
             const previewBody = document.getElementById('previewBody');
@@ -479,21 +887,54 @@ if (isset($_SESSION['message'])) {
                 <p><strong>Department:</strong> ${department}</p>
                 <p><strong>Year:</strong> ${year}</p>
                 <p><strong>Semester:</strong> ${semester}</p>
-                <hr style="margin: 1rem 0; border-color: var(--border-color);">
-                <h4>Questions:</h4>
-                <ul style="list-style-position: inside; padding-left: 0;">${questions || '<li>No questions added yet.</li>'}</ul>
+                
+                <h4>Subjects & Faculty:</h4>
+                <ul>${assignments || '<li>No subjects assigned yet.</li>'}</ul>
+                
+                <h4 style="margin-top: 1rem;">Questions:</h4>
+                <ul>${questions || '<li>No questions added yet.</li>'}</ul>
             `;
             openModal('previewModal');
         }
 
         document.addEventListener('DOMContentLoaded', function() {
-            addQuestion(); // Add the first blank question automatically
+            addAssignmentRow(); // Start with one subject/faculty row
+            addQuestion(); // Start with one blank question
             
+            // Show session message if it exists
             <?php if (!empty($message)): ?>
                 showMessageModal('<?php echo addslashes($message); ?>', '<?php echo $message_type; ?>');
             <?php endif; ?>
+
+            // Theme Toggle
+            const themeToggleBtn = document.getElementById('themeToggleBtn');
+            if(themeToggleBtn) {
+                // Check local storage for theme
+                if (localStorage.getItem('theme') === 'dark') {
+                    document.body.classList.add('dark-theme');
+                    themeToggleBtn.querySelector('i').classList.replace('fa-sun', 'fa-moon');
+                }
+
+                themeToggleBtn.addEventListener('click', () => {
+                    document.body.classList.toggle('dark-theme');
+                    const icon = themeToggleBtn.querySelector('i');
+                    if (document.body.classList.contains('dark-theme')) {
+                        icon.classList.replace('fa-sun', 'fa-moon');
+                        localStorage.setItem('theme', 'dark');
+                    } else {
+                        icon.classList.replace('fa-moon', 'fa-sun');
+                        localStorage.setItem('theme', 'light');
+                    }
+                });
+            }
         });
+
+        // Close modal on outside click
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal-overlay')) {
+                event.target.classList.remove('active');
+            }
+        }
     </script>
 </body>
 </html>
-
